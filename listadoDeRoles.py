@@ -1,4 +1,7 @@
 ROLES = [
+    {"id": "901961295586", "role": "ExtractData", "account": "awspierrefabre"},
+]
+"""
     {"id": "575750881751", "role": "ExtractData", "account": "aws-fiebredemalta-prod"},
     {"id": "901961295586", "role": "ExtractData", "account": "awspierrefabre"},
     {"id": "514621341182", "role": "ExtractData", "account": "aws-venturaentertrainment-dev"},
@@ -126,4 +129,4 @@ ROLES = [
     {"id": "816069138515", "role": "ExtractData", "account": "aws-clilogistics-audit"},
     {"id": "982081048005", "role": "ExtractData", "account": "aws-clilogistics-bi-prod"},
     {"id": "816069125662", "role": "ExtractData", "account": "aws-clilogistics-buckets-prod"}
-]
+]"""
