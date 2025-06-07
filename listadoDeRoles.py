@@ -39,6 +39,7 @@ ROLES = [
     {"id": "879381261074", "role": "ExtractData", "account": "aws-cinepolis-palomeras-poc-saas"},
     {"id": "585008075123", "role": "ExtractData", "account": "aws-bmw-datalake-poc-saas"},
     {"id": "729694432199", "role": "service-role/CMDB-multiaccount-role-qzrheo7e", "account": "infrapoc"},
+    {"id": "729694432199", "role": "jira-health-event-monitoring-assume-role", "account": "infrapoc"},
     {"id": "471112629758", "role": "ExtractData", "account": "Log Archive - Pincipal"},
     {"id": "433224684750", "role": "ExtractData", "account": "gbconnected-xaldigital"},
     {"id": "145343356350", "role": "ExtractData", "account": "awsxaldigitalapps"},
