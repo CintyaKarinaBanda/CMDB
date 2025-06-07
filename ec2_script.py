@@ -16,14 +16,6 @@ from Servicios.cloudtrail_functions import get_ec2_cloudtrail_events, insert_or_
 
 from config import Regions
 
-import logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-
 def assume_role(role_arn):
     sts_client = boto3.client("sts")
     try:
@@ -39,7 +31,7 @@ def assume_role(role_arn):
             "SessionToken": credentials["SessionToken"]
         }
     except ClientError as e:
-        logger.error(f"Error al asumir el rol {role_arn}: {str(e)}")
+        print(f"Error al asumir el rol {role_arn}: {str(e)}")
         return {"error": str(e)}
 
 
@@ -89,17 +81,8 @@ def process_account_region(account_id, role_name, account_name, region, requeste
         return {"account_id": account_id, "region": region, "error": str(e)}
 
 
-def main():
-    parser = argparse.ArgumentParser(description='Recolecta información de recursos AWS en múltiples cuentas')
-    parser.add_argument('--services', nargs='+', default=["ec2", "rds", "redshift", "vpc", "subnets", "cloudtrail_events"],
-                        help='Servicios a consultar (ec2, rds, redshift, vpc, subnets, cloudtrail_events)')
-    parser.add_argument('--max-workers', type=int, default=10,
-                        help='Número máximo de workers para procesamiento paralelo')
-    parser.add_argument('--output', type=str, default=None,
-                        help='Archivo de salida para guardar resultados en formato JSON')
-    
-    args = parser.parse_args()
-    
+def main(requested_services):
+
     errors = {}
     collected_data = {
         "ec2": [],
@@ -114,10 +97,9 @@ def main():
     db_results = {}
     messages = []
 
-    requested_services = args.services
-    logger.info(f"Iniciando recolección de datos para servicios: {', '.join(requested_services)}")
+    print(f"Iniciando recolección de datos para servicios: {', '.join(requested_services)}")
     
-    with ThreadPoolExecutor(max_workers=args.max_workers) as executor:
+    with ThreadPoolExecutor(max_workers=20) as executor:
         futures = [
             executor.submit(process_account_region, role["id"], role["role"], role["account"], region, requested_services)
             for role in ROLES
@@ -179,35 +161,15 @@ def main():
                 f"({result.get('inserted', 0)} insertados, {result.get('updated', 0)} actualizados)"
             )
 
-    # Mostrar resultados
     for message in messages:
-        logger.info(message)
+        print(message)
     
     if errors:
-        logger.warning(f"Se encontraron errores en {len(errors)} cuentas")
+        print(f"Se encontraron errores en {len(errors)} cuentas")
         for account_id, error_list in errors.items():
-            logger.warning(f"Cuenta {account_id}: {len(error_list)} errores")
-    
-    # Guardar resultados en archivo si se especificó
-    if args.output:
-        output_data = {
-            "messages": messages,
-            "database_result": db_results,
-            "errors": errors
-        }
-        with open(args.output, 'w') as f:
-            json.dump(output_data, f, indent=2)
-        logger.info(f"Resultados guardados en {args.output}")
-    
-    return {
-        "statusCode": 200,
-        "body": {
-            "message": " | ".join(messages),
-            "database_result": db_results,
-            "errors": errors
-        }
-    }
+            print(f"Cuenta {account_id}: {len(error_list)} errores")
 
 
 if __name__ == "__main__":
-    main()
+    requested_services=['ec2']
+    main(requested_services)
