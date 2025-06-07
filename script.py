@@ -37,8 +37,7 @@ def assume_role(role_arn):
 def process_account_region(account_id, role_name, account_name, region, requested_services):
     """Procesa una combinación de cuenta/región para los servicios solicitados."""
     start_time = datetime.now()
-    print(f"[{account_id}:{region}] Iniciando procesamiento")
-    
+
     # Asumir rol
     role_arn = f"arn:aws:iam::{account_id}:role/{role_name}"
     credentials = assume_role(role_arn)
@@ -85,17 +84,14 @@ def process_account_region(account_id, role_name, account_name, region, requeste
                 continue
                 
             service_start = datetime.now()
-            print(f"[{account_id}:{region}] Iniciando {service}")
             
             try:
                 # Ejecutar función correspondiente
                 result[f"{service}_data" if service != "cloudtrail_events" else service] = service_functions[service]()
                 
-                # Mostrar resultados
                 key = f"{service}_data" if service != "cloudtrail_events" else service
                 count = len(result[key])
                 duration = (datetime.now() - service_start).total_seconds()
-                print(f"[{account_id}:{region}] {service}: {count} items en {duration:.2f}s")
                 
             except Exception as e:
                 print(f"[{account_id}:{region}] Error en {service}: {str(e)}")
