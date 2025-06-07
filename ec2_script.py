@@ -175,5 +175,5 @@ def main(requested_services):
 
 
 if __name__ == "__main__":
-    requested_services=['ec2']
+    requested_services=['cloudtrail_events']
     main(requested_services)
