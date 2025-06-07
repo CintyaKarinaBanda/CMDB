@@ -333,9 +333,21 @@ def get_ec2_cloudtrail_events(region, credentials):
         parsed_events = []
         skipped_events = 0
         unknown_resources = 0
+        non_instance_resources = 0
+        
+        # Conjunto para rastrear IDs de eventos ya procesados
+        processed_event_ids = set()
         
         for raw_event in all_events:
             try:
+                # Extraer ID del evento para evitar duplicados
+                event_id = raw_event.get("EventId")
+                
+                # Saltar si ya procesamos este evento
+                if event_id in processed_event_ids:
+                    skipped_events += 1
+                    continue
+                
                 # Extraer detalles del evento
                 detail = json.loads(raw_event.get("CloudTrailEvent", "{}"))
                 event_name = detail.get("eventName")
@@ -374,6 +386,11 @@ def get_ec2_cloudtrail_events(region, credentials):
                         if resource_id:
                             resource_name = resource_id
                 
+                # Verificar si el recurso es una instancia EC2 (comienza con i-)
+                if not resource_name.startswith("i-"):
+                    non_instance_resources += 1
+                    continue
+                
                 if resource_name == "unknown":
                     unknown_resources += 1
                 
@@ -388,20 +405,15 @@ def get_ec2_cloudtrail_events(region, credentials):
                         resources = []
                         for resource in resources_set:
                             resource_id = resource.get("resourceId")
-                            if resource_id:
+                            if resource_id and resource_id.startswith("i-"):
                                 resources.append(resource_id)
                         
                         if resources and "details" in changes:
                             changes["details"]["resources"] = resources
-                            
-                            # Si el recurso principal sigue siendo unknown pero tenemos recursos,
-                            # usar el primer recurso como nombre del recurso
-                            if resource_name == "unknown" and resources:
-                                resource_name = resources[0]
                 
                 # Crear evento procesado
                 parsed_event = {
-                    "event_id": raw_event.get("EventId"),
+                    "event_id": event_id,
                     "event_time": raw_event.get("EventTime"),
                     "event_name": event_name,
                     "event_source": detail.get("eventSource", "unknown"),
@@ -411,7 +423,11 @@ def get_ec2_cloudtrail_events(region, credentials):
                     "region": region
                 }
                 
+                # Añadir el evento a la lista de procesados
                 parsed_events.append(parsed_event)
+                
+                # Marcar este ID de evento como procesado
+                processed_event_ids.add(event_id)
                 
             except Exception as e:
                 print(f"[CloudTrail] Error al procesar evento: {str(e)}")
@@ -419,6 +435,7 @@ def get_ec2_cloudtrail_events(region, credentials):
         
         print(f"[CloudTrail] Eventos procesados: {len(parsed_events)}")
         print(f"[CloudTrail] Eventos omitidos: {skipped_events}")
+        print(f"[CloudTrail] Recursos no instancia: {non_instance_resources}")
         print(f"[CloudTrail] Recursos desconocidos: {unknown_resources}")
         
         return {"events": parsed_events}
@@ -434,24 +451,31 @@ def insert_or_update_cloudtrail_events(events, region, credentials):
         return {"error": "Error al conectar a la base de datos", "inserted": 0, "processed": 0}
 
     start_time = datetime.utcnow() - timedelta(days=7)
-    inserted, processed = 0, 0
+    inserted, processed, skipped = 0, 0, 0
 
     try:
         # Obtener eventos existentes
         with conn.cursor() as cursor:
             cursor.execute(
-                "SELECT id_event, event_time FROM ec2_cloudtrail_events WHERE event_time >= %s", 
-                (start_time,)
+                "SELECT id_event FROM ec2_cloudtrail_events"
             )
-            existing_keys = {f"{row[0]}_{row[1].isoformat()}" for row in cursor.fetchall()}
+            existing_event_ids = {row[0] for row in cursor.fetchall()}
 
         # Insertar nuevos eventos
         with conn.cursor() as cursor:
             for event in events:
                 processed += 1
-                key = f"{event['event_id']}_{event['event_time'].isoformat()}"
+                event_id = event["event_id"]
                 
-                if key in existing_keys:
+                # Verificar si el evento ya existe en la base de datos
+                if event_id in existing_event_ids:
+                    skipped += 1
+                    continue
+                
+                # Verificar que el recurso sea una instancia EC2
+                resource_name = event["resource_name"]
+                if not resource_name.startswith("i-"):
+                    skipped += 1
                     continue
 
                 cursor.execute("""
@@ -460,18 +484,21 @@ def insert_or_update_cloudtrail_events(events, region, credentials):
                         event_source, resource_name, changes
                     ) VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """, (
-                    event["event_id"], event["event_name"], event["event_time"],
-                    event["user_name"], event["event_source"], event["resource_name"],
+                    event_id, event["event_name"], event["event_time"],
+                    event["user_name"], event["event_source"], resource_name,
                     json.dumps(event["changes"])
                 ))
                 inserted += 1
+                existing_event_ids.add(event_id)  # Actualizar el conjunto para evitar duplicados en el mismo lote
 
         conn.commit()
-        return {"inserted": inserted, "processed": processed}
+        print(f"[CloudTrail DB] Procesados: {processed}, Insertados: {inserted}, Omitidos: {skipped}")
+        return {"inserted": inserted, "processed": processed, "skipped": skipped}
 
     except Exception as e:
         conn.rollback()
-        return {"error": str(e), "inserted": inserted, "processed": processed}
+        print(f"[CloudTrail DB] Error: {str(e)}")
+        return {"error": str(e), "inserted": inserted, "processed": processed, "skipped": skipped}
 
     finally:
         conn.close()
