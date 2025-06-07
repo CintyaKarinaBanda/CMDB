@@ -14,9 +14,58 @@ IMPORTANT_EC2_EVENTS = {
 }
 
 def extract_instance_id(event):
-    """Extrae el ID de instancia de un evento CloudTrail de manera exhaustiva."""
-    # Función para buscar IDs de instancia en cualquier estructura de datos
-    def find_instance_ids(obj, path=""):
+    """Extrae el ID de recurso de un evento CloudTrail de manera exhaustiva."""
+    event_name = event.get("eventName", "")
+    req = event.get("requestParameters", {})
+    res = event.get("responseElements", {})
+    
+    # Para eventos CreateTags, extraer el recurso de resourcesSet
+    if event_name == "CreateTags":
+        resources_set = req.get("resourcesSet", {}).get("items", [])
+        if resources_set:
+            for resource in resources_set:
+                resource_id = resource.get("resourceId")
+                if resource_id:
+                    # Si es una ENI, instancia, volumen o snapshot, devolverlo directamente
+                    if (resource_id.startswith("i-") or 
+                        resource_id.startswith("vol-") or 
+                        resource_id.startswith("snap-") or 
+                        resource_id.startswith("eni-") or
+                        resource_id.startswith("ami-")):
+                        return resource_id
+    
+    # Para eventos de instancias específicos
+    instance_events = ["StartInstances", "StopInstances", "RebootInstances", "TerminateInstances"]
+    if event_name in instance_events:
+        # Buscar en instancesSet
+        instances = req.get("instancesSet", {}).get("items", []) or res.get("instancesSet", {}).get("items", [])
+        if instances and len(instances) > 0:
+            for instance in instances:
+                instance_id = instance.get("instanceId")
+                if instance_id and instance_id.startswith("i-"):
+                    return instance_id
+    
+    # Para ModifyInstanceAttribute
+    if event_name == "ModifyInstanceAttribute":
+        instance_id = req.get("instanceId")
+        if instance_id and instance_id.startswith("i-"):
+            return instance_id
+    
+    # Para eventos de volumen
+    volume_events = ["AttachVolume", "DetachVolume", "ModifyVolume"]
+    if event_name in volume_events:
+        # Primero intentar obtener la instancia asociada
+        instance_id = req.get("instanceId") or res.get("instanceId")
+        if instance_id and instance_id.startswith("i-"):
+            return instance_id
+        
+        # Si no hay instancia, devolver el volumen
+        volume_id = req.get("volumeId") or res.get("volumeId")
+        if volume_id and volume_id.startswith("vol-"):
+            return volume_id
+    
+    # Función para buscar IDs de recursos en cualquier estructura de datos
+    def find_resource_ids(obj, path=""):
         if not obj:
             return []
             
@@ -25,70 +74,79 @@ def extract_instance_id(event):
         # Si es un diccionario, buscar en sus claves y valores
         if isinstance(obj, dict):
             # Buscar directamente en claves específicas
-            for key in ["instanceId", "resourceId", "resourceName", "instancesSet"]:
-                if key in obj and obj[key] and isinstance(obj[key], str) and obj[key].startswith("i-"):
-                    found_ids.append((obj[key], f"{path}.{key}"))
+            for key in ["instanceId", "resourceId", "volumeId", "snapshotId", "networkInterfaceId"]:
+                if key in obj and obj[key] and isinstance(obj[key], str):
+                    value = obj[key]
+                    if (value.startswith("i-") or value.startswith("vol-") or 
+                        value.startswith("snap-") or value.startswith("eni-") or
+                        value.startswith("ami-")):
+                        found_ids.append((value, f"{path}.{key}"))
             
             # Buscar recursivamente en todos los valores
             for key, value in obj.items():
-                found_ids.extend(find_instance_ids(value, f"{path}.{key}"))
+                found_ids.extend(find_resource_ids(value, f"{path}.{key}"))
                 
         # Si es una lista, buscar en cada elemento
         elif isinstance(obj, list):
             for i, item in enumerate(obj):
-                found_ids.extend(find_instance_ids(item, f"{path}[{i}]"))
+                found_ids.extend(find_resource_ids(item, f"{path}[{i}]"))
                 
-        # Si es un string, verificar si es un ID de instancia
-        elif isinstance(obj, str) and obj.startswith("i-"):
-            found_ids.append((obj, path))
+        # Si es un string, verificar si es un ID de recurso
+        elif isinstance(obj, str):
+            if (obj.startswith("i-") or obj.startswith("vol-") or 
+                obj.startswith("snap-") or obj.startswith("eni-") or
+                obj.startswith("ami-")):
+                found_ids.append((obj, path))
             
         return found_ids
     
     # Buscar en lugares específicos primero (búsqueda directa)
-    req = event.get("requestParameters", {})
-    res = event.get("responseElements", {})
-    
     direct_paths = [
         req.get("instanceId"),
         req.get("resourceId"),
-        req.get("instancesSet", {}).get("items", [{}])[0].get("instanceId") if req.get("instancesSet") else None,
-        req.get("resourcesSet", {}).get("items", [{}])[0].get("resourceId") if req.get("resourcesSet") else None,
+        req.get("volumeId"),
+        req.get("snapshotId"),
+        req.get("networkInterfaceId"),
         res.get("instanceId"),
-        res.get("instancesSet", {}).get("items", [{}])[0].get("instanceId") if res.get("instancesSet") else None,
-        res.get("instances", [{}])[0].get("instanceId") if res.get("instances") else None
+        res.get("volumeId"),
+        res.get("snapshotId"),
+        res.get("networkInterfaceId")
     ]
     
     # Verificar resultados de búsqueda directa
     for path in direct_paths:
-        if path and isinstance(path, str) and path.startswith("i-"):
-            return path
+        if path and isinstance(path, str):
+            if (path.startswith("i-") or path.startswith("vol-") or 
+                path.startswith("snap-") or path.startswith("eni-") or
+                path.startswith("ami-")):
+                return path
     
     # Si no se encuentra en las rutas directas, hacer una búsqueda exhaustiva
-    all_ids = find_instance_ids(req, "requestParameters") + find_instance_ids(res, "responseElements")
+    all_ids = find_resource_ids(req, "requestParameters") + find_resource_ids(res, "responseElements")
     
     # Si se encontraron IDs, devolver el primero
     if all_ids:
-        print(f"[CloudTrail] ID de instancia encontrado en ruta no estándar: {all_ids[0][1]}")
         return all_ids[0][0]
     
     # Buscar en el evento completo como último recurso
-    all_ids = find_instance_ids(event, "root")
+    all_ids = find_resource_ids(event, "root")
     if all_ids:
-        print(f"[CloudTrail] ID de instancia encontrado en evento completo: {all_ids[0][1]}")
         return all_ids[0][0]
     
-    # Si aún no se encuentra, intentar extraer de ARNs o recursos relacionados
+    # Si aún no se encuentra, intentar extraer de resources
     resources = event.get("resources", [])
     for resource in resources:
-        resource_type = resource.get("type")
         resource_name = resource.get("ARN") or resource.get("resourceName")
         
-        if resource_type == "AWS::EC2::Instance" and resource_name:
-            # Extraer ID de instancia del ARN o nombre
-            if isinstance(resource_name, str):
-                parts = resource_name.split("/")
-                if len(parts) > 1 and parts[-1].startswith("i-"):
-                    return parts[-1]
+        if resource_name and isinstance(resource_name, str):
+            # Extraer ID del recurso del ARN o nombre
+            parts = resource_name.split("/")
+            if len(parts) > 1:
+                last_part = parts[-1]
+                if (last_part.startswith("i-") or last_part.startswith("vol-") or 
+                    last_part.startswith("snap-") or last_part.startswith("eni-") or
+                    last_part.startswith("ami-")):
+                    return last_part
     
     return "unknown"
 
@@ -306,11 +364,40 @@ def get_ec2_cloudtrail_events(region, credentials):
                 
                 # Extraer ID de recurso
                 resource_name = extract_instance_id(detail)
+                
+                # Para eventos CreateTags, extraer el recurso directamente de los detalles
+                if event_name == "CreateTags" and resource_name == "unknown":
+                    req = detail.get("requestParameters", {})
+                    resources_set = req.get("resourcesSet", {}).get("items", [])
+                    if resources_set and len(resources_set) > 0:
+                        resource_id = resources_set[0].get("resourceId")
+                        if resource_id:
+                            resource_name = resource_id
+                
                 if resource_name == "unknown":
                     unknown_resources += 1
                 
                 # Extraer cambios detallados
                 changes = extract_changes(detail)
+                
+                # Para eventos CreateTags, asegurarse de que los recursos estén en los cambios
+                if event_name == "CreateTags" and isinstance(changes, dict):
+                    req = detail.get("requestParameters", {})
+                    resources_set = req.get("resourcesSet", {}).get("items", [])
+                    if resources_set:
+                        resources = []
+                        for resource in resources_set:
+                            resource_id = resource.get("resourceId")
+                            if resource_id:
+                                resources.append(resource_id)
+                        
+                        if resources and "details" in changes:
+                            changes["details"]["resources"] = resources
+                            
+                            # Si el recurso principal sigue siendo unknown pero tenemos recursos,
+                            # usar el primer recurso como nombre del recurso
+                            if resource_name == "unknown" and resources:
+                                resource_name = resources[0]
                 
                 # Crear evento procesado
                 parsed_event = {
@@ -321,8 +408,7 @@ def get_ec2_cloudtrail_events(region, credentials):
                     "user_name": user_name,
                     "resource_name": resource_name,
                     "changes": changes,
-                    "region": region,
-                    "raw_event": detail  # Incluir el evento completo para referencia
+                    "region": region
                 }
                 
                 parsed_events.append(parsed_event)
