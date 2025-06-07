@@ -1,7 +1,4 @@
 ROLES = [
-    {"id": "901961295586", "role": "ExtractData", "account": "awspierrefabre"},
-]
-"""
     {"id": "575750881751", "role": "ExtractData", "account": "aws-fiebredemalta-prod"},
     {"id": "901961295586", "role": "ExtractData", "account": "awspierrefabre"},
     {"id": "514621341182", "role": "ExtractData", "account": "aws-venturaentertrainment-dev"},
@@ -67,7 +64,8 @@ ROLES = [
     {"id": "445567072139", "role": "ExtractData", "account": "aws-absara-lineas-poc-saas"},
     {"id": "585768163640", "role": "ExtractData", "account": "aws-banregio-data-migration-poc-paas"},
     {"id": "693113361258", "role": "ExtractData", "account": "aws-bayer-asistente-virtual-dev-saas"},
-
+]
+"""
     {"id": "058264516602", "role": "ExtractData", "account": "Log Archive - Servitel"},
     {"id": "954976304746", "role": "ExtractData", "account": "aws-servientrega-siscor-prod"},
     {"id": "533267146110", "role": "ExtractData", "account": "aws-servientrega-colombia-app-prod"},
