@@ -1,4 +1,4 @@
-# Servicios/cloudtrail_functions.py
+# Servicios/cloudtrail_functions_optimized.py
 
 import json
 from datetime import datetime, timedelta
@@ -73,7 +73,6 @@ def extract_changes(event):
 
 def get_ec2_cloudtrail_events(region, credentials):
     print(f"[CloudTrail] Iniciando consulta en región {region}")
-    start_time_total = datetime.utcnow()
     
     # Limitar la consulta a solo 1 día en lugar de 7 para reducir la carga
     start_time = datetime.utcnow() - timedelta(days=1)
@@ -86,7 +85,7 @@ def get_ec2_cloudtrail_events(region, credentials):
             return {"error": "Error al crear cliente CloudTrail", "events": []}
 
         # Establecer un límite máximo de eventos para evitar bucles infinitos
-        max_events = 1000
+        max_events = 100
         all_events = []
         next_token = None
         api_calls = 0
@@ -94,11 +93,10 @@ def get_ec2_cloudtrail_events(region, credentials):
         print(f"[CloudTrail] Consultando eventos desde {start_time} (máximo {max_events} eventos)")
         
         # Limitar el número de llamadas a la API
-        max_api_calls = 5
+        max_api_calls = 2
         
         while api_calls < max_api_calls:
             api_calls += 1
-            api_start = datetime.utcnow()
             
             try:
                 response = client.lookup_events(
@@ -108,15 +106,14 @@ def get_ec2_cloudtrail_events(region, credentials):
                     }],
                     StartTime=start_time,
                     EndTime=datetime.utcnow(),
-                    MaxResults=100,  # Limitar resultados por página
+                    MaxResults=50,  # Limitar resultados por página
                     **({"NextToken": next_token} if next_token else {})
                 )
                 
                 events_batch = response.get("Events", [])
                 all_events.extend(events_batch)
-                api_duration = (datetime.utcnow() - api_start).total_seconds()
                 
-                print(f"[CloudTrail] API call #{api_calls}: {len(events_batch)} eventos en {api_duration:.2f}s")
+                print(f"[CloudTrail] API call #{api_calls}: {len(events_batch)} eventos obtenidos")
                 
                 # Verificar si hemos alcanzado el límite máximo de eventos
                 if len(all_events) >= max_events:
@@ -131,10 +128,9 @@ def get_ec2_cloudtrail_events(region, credentials):
                 print(f"[CloudTrail] Error en llamada API #{api_calls}: {str(e)}")
                 break
         
-        print(f"[CloudTrail] Total eventos obtenidos: {len(all_events)} en {api_calls} llamadas")
+        print(f"[CloudTrail] Total eventos obtenidos: {len(all_events)}")
         
         # Procesar eventos
-        parse_start = datetime.utcnow()
         parsed_events = []
         
         for raw_event in all_events:
@@ -171,12 +167,7 @@ def get_ec2_cloudtrail_events(region, credentials):
                 print(f"[CloudTrail] Error al procesar evento: {str(e)}")
                 continue
         
-        parse_duration = (datetime.utcnow() - parse_start).total_seconds()
-        total_duration = (datetime.utcnow() - start_time_total).total_seconds()
-        
-        print(f"[CloudTrail] {len(parsed_events)} eventos importantes procesados en {parse_duration:.2f}s")
-        print(f"[CloudTrail] Tiempo total: {total_duration:.2f}s para región {region}")
-        
+        print(f"[CloudTrail] {len(parsed_events)} eventos importantes procesados")
         return {"events": parsed_events}
 
     except Exception as e:
