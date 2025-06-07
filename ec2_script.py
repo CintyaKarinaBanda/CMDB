@@ -224,7 +224,7 @@ def main(requested_services):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Recolecta información de recursos AWS')
-    parser.add_argument('--services', nargs='+', default=["ec2"],
+    parser.add_argument('--services', nargs='+', default=["cloudtrail_events"],
                         choices=["ec2", "rds", "redshift", "vpc", "subnets", "cloudtrail_events"],
                         help='Servicios a consultar')
     args = parser.parse_args()
