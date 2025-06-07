@@ -72,24 +72,16 @@ def extract_changes(event):
 
 
 def get_ec2_cloudtrail_events(region, credentials):
-    print(f"[CloudTrail] Iniciando consulta de eventos en región {region}")
-    start_total = datetime.utcnow()
-    
     client = create_aws_client("cloudtrail", region, credentials)
+    print('Cliente', client)
     if not client:
-        print(f"[CloudTrail] Error al crear cliente CloudTrail para región {region}")
         return {"error": "Error al crear cliente CloudTrail", "events": []}
 
     start_time = datetime.utcnow() - timedelta(days=7)
     all_events, next_token = [], None
-    api_calls = 0
 
     try:
-        print(f"[CloudTrail] Consultando eventos desde {start_time}")
-        api_start = datetime.utcnow()
-        
         while True:
-            api_call_start = datetime.utcnow()
             response = client.lookup_events(
                 LookupAttributes=[{
                     "AttributeKey": "EventSource",
@@ -99,33 +91,17 @@ def get_ec2_cloudtrail_events(region, credentials):
                 EndTime=datetime.utcnow(),
                 **({"NextToken": next_token} if next_token else {})
             )
-            api_calls += 1
-            
-            events_count = len(response.get("Events", []))
-            api_call_duration = (datetime.utcnow() - api_call_start).total_seconds()
-            print(f"[CloudTrail] API call #{api_calls}: Obtenidos {events_count} eventos en {api_call_duration:.2f} segundos")
-            
             all_events.extend(response.get("Events", []))
             next_token = response.get("NextToken")
             if not next_token:
                 break
-        
-        api_duration = (datetime.utcnow() - api_start).total_seconds()
-        print(f"[CloudTrail] Total de llamadas API: {api_calls}, eventos obtenidos: {len(all_events)} en {api_duration:.2f} segundos")
-        
-        print(f"[CloudTrail] Iniciando procesamiento de {len(all_events)} eventos")
-        parse_start = datetime.utcnow()
+
         parsed_events = []
-        processed = 0
-        filtered = 0
-        
         for raw_event in all_events:
-            processed += 1
             try:
                 detail = json.loads(raw_event.get("CloudTrailEvent", "{}"))
                 event_name = detail.get("eventName")
                 if event_name not in IMPORTANT_EC2_EVENTS:
-                    filtered += 1
                     continue
 
                 event_id = raw_event.get("EventId")
@@ -151,16 +127,9 @@ def get_ec2_cloudtrail_events(region, credentials):
                     "changes": extract_changes(detail)
                 })
 
-            except Exception as e:
-                print(f"[CloudTrail] Error al procesar evento: {str(e)}")
+            except Exception:
                 continue
-        
-        parse_duration = (datetime.utcnow() - parse_start).total_seconds()
-        print(f"[CloudTrail] Procesamiento completado: {processed} eventos procesados, {filtered} filtrados, {len(parsed_events)} eventos importantes en {parse_duration:.2f} segundos")
-        
-        total_duration = (datetime.utcnow() - start_total).total_seconds()
-        print(f"[CloudTrail] Tiempo total de ejecución para región {region}: {total_duration:.2f} segundos")
-        
+
         return {"events": parsed_events}
 
     except Exception as e:
