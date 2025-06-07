@@ -2,7 +2,7 @@
 
 import json
 from datetime import datetime, timedelta
-from utils import create_aws_client, get_db_connection
+from Servicios.utils import create_aws_client, get_db_connection
 
 IMPORTANT_EC2_EVENTS = {
     "StartInstances", "StopInstances", "RebootInstances", "TerminateInstances", "ModifyInstanceAttribute",

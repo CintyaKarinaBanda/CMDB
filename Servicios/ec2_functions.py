@@ -1,5 +1,5 @@
 from botocore.exceptions import ClientError
-from utils import create_aws_client, get_db_connection
+from Servicios.utils import create_aws_client, get_db_connection
 
 def get_vpc_name(ec2_client, vpc_id):
     try:
