@@ -36,6 +36,7 @@ def assume_role(role_arn):
 
 
 def process_account_region(account_id, role_name, account_name, region, requested_services):
+    print(f"Procesando cuenta {account_id} en la región {region}")
     role_arn = f"arn:aws:iam::{account_id}:role/{role_name}"
     credentials = assume_role(role_arn)
 
