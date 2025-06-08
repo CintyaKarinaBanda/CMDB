@@ -1,0 +1,2 @@
+from Servicios.ec2_functions import get_ec2_instances, insert_or_update_ec2_data
+from Servicios.cloudtrail_functions import get_ec2_cloudtrail_events, insert_or_update_cloudtrail_events
