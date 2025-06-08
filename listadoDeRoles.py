@@ -38,7 +38,6 @@ ROLES = [
     {"id": "963647158320", "role": "ExtractData", "account": "aws-cooperwebpage-prod"},
     {"id": "879381261074", "role": "ExtractData", "account": "aws-cinepolis-palomeras-poc-saas"},
     {"id": "585008075123", "role": "ExtractData", "account": "aws-bmw-datalake-poc-saas"},
-    {"id": "729694432199", "role": "service-role/CMDB-multiaccount-role-qzrheo7e", "account": "infrapoc"},
     {"id": "729694432199", "role": "jira-health-event-monitoring-assume-role", "account": "infrapoc"},
     {"id": "471112629758", "role": "ExtractData", "account": "Log Archive - Pincipal"},
     {"id": "433224684750", "role": "ExtractData", "account": "gbconnected-xaldigital"},
@@ -128,3 +127,5 @@ ROLES = [
     {"id": "982081048005", "role": "ExtractData", "account": "aws-clilogistics-bi-prod"},
     {"id": "816069125662", "role": "ExtractData", "account": "aws-clilogistics-buckets-prod"}
 ]
+
+#{"id": "729694432199", "role": "service-role/CMDB-multiaccount-role-qzrheo7e", "account": "infrapoc"},
