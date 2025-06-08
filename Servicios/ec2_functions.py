@@ -1,5 +1,35 @@
 from botocore.exceptions import ClientError
+from datetime import datetime
 from Servicios.utils import create_aws_client, get_db_connection
+
+def get_instance_changed_by(instance_id, update_date):
+    if not (conn := get_db_connection()):
+        print("Error al conectar a la base de datos para buscar changed_by")
+        return "unknown"
+    
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT user_name, event_time, event_name
+                FROM ec2_cloudtrail_events
+                WHERE resource_name = %s
+                  AND ABS(TIMESTAMPDIFF(SECOND, event_time, %s)) < 86400  -- Eventos dentro de ±24 horas
+                ORDER BY ABS(TIMESTAMPDIFF(SECOND, event_time, %s)) ASC
+                LIMIT 1
+            """, (instance_id, update_date, update_date))
+            
+            result = cursor.fetchone()
+            if result:
+                user_name, event_time, event_name = result
+                print(f"CloudTrail: Cambio en {instance_id} realizado por {user_name} ({event_name}) en {event_time}")
+                return user_name
+            
+            return "unknown"
+    except Exception as e:
+        print(f"Error al buscar changed_by: {str(e)}")
+        return "unknown"
+    finally:
+        conn.close()
 
 def get_vpc_name(ec2_client, vpc_id):
     try:
@@ -152,15 +182,11 @@ def insert_or_update_ec2_data(ec2_data, region, credentials=None):
                     if str(old_val) != str(new_val):
                         updates.append(f"{col} = %s")
                         values.append(new_val)
-                        """changed_by = get_user_from_cloudtrail(
-                            resource_name=instance_id,
-                            field_name=col,
-                            region=ec2["Region"],
-                            credentials=credentials
-                        )"""
-
-                        changed_by = "lambda"
-
+                        changed_by = get_instance_changed_by(
+                            instance_id=instance_id,
+                            update_date=datetime.now()
+                        )
+                        
                         cursor.execute(
                             query_change_history,
                             (instance_id, col, str(old_val), str(new_val), changed_by)
