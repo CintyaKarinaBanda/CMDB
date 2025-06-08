@@ -13,8 +13,8 @@ def get_instance_changed_by(instance_id, update_date):
                 SELECT user_name, event_time, event_name
                 FROM ec2_cloudtrail_events
                 WHERE resource_name = %s
-                  AND ABS(TIMESTAMPDIFF(SECOND, event_time, %s)) < 86400  -- Eventos dentro de ±24 horas
-                ORDER BY ABS(TIMESTAMPDIFF(SECOND, event_time, %s)) ASC
+                  AND ABS(EXTRACT(EPOCH FROM (event_time - %s))) < 86400  -- Eventos dentro de ±24 horas
+                ORDER BY ABS(EXTRACT(EPOCH FROM (event_time - %s))) ASC
                 LIMIT 1
             """, (instance_id, update_date, update_date))
             
