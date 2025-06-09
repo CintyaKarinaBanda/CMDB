@@ -16,6 +16,13 @@ IMPORTANT_RDS_EVENTS = {
     "CreateDBSnapshot", "DeleteDBSnapshot", "AddTagsToResource", "RemoveTagsFromResource"
 }
 
+IMPORTANT_VPC_EVENTS = {
+    "CreateVpc", "DeleteVpc", "ModifyVpcAttribute", "CreateSubnet", "DeleteSubnet", 
+    "ModifySubnetAttribute", "CreateRouteTable", "DeleteRouteTable", "CreateRoute", 
+    "DeleteRoute", "CreateInternetGateway", "DeleteInternetGateway", "AttachInternetGateway", 
+    "DetachInternetGateway", "CreateNatGateway", "DeleteNatGateway"
+}
+
 def extract_resource_id(event, resource_type):
     """Extrae el ID del recurso del evento según el tipo."""
     req = event.get("requestParameters", {})
@@ -58,6 +65,36 @@ def extract_resource_id(event, resource_type):
                 parts = resource_arn.split(":")
                 if len(parts) > 6:
                     return parts[6]
+    
+    # Para recursos VPC
+    elif resource_type == "VPC":
+        # Buscar en campos específicos de VPC
+        if "vpcId" in req:
+            return req["vpcId"]
+        
+        if "vpc" in res and "vpcId" in res["vpc"]:
+            return res["vpc"]["vpcId"]
+        
+        # Para eventos de subnet
+        if "subnetId" in req:
+            return req["subnetId"]
+        
+        if "subnet" in res and "subnetId" in res["subnet"]:
+            return res["subnet"]["subnetId"]
+        
+        # Para eventos de internet gateway
+        if "internetGatewayId" in req:
+            return req["internetGatewayId"]
+        
+        if "internetGateway" in res and "internetGatewayId" in res["internetGateway"]:
+            return res["internetGateway"]["internetGatewayId"]
+        
+        # Para eventos de NAT gateway
+        if "natGatewayId" in req:
+            return req["natGatewayId"]
+        
+        if "natGateway" in res and "natGatewayId" in res["natGateway"]:
+            return res["natGateway"]["natGatewayId"]
     
     return "unknown"
 
@@ -103,6 +140,48 @@ def extract_changes(event, resource_type):
             if "tags" in req:
                 changes["details"]["tags"] = req["tags"]
     
+    # Para recursos VPC
+    elif resource_type == "VPC":
+        if event_name == "CreateVpc":
+            changes["details"].update({
+                "cidrBlock": req.get("cidrBlock"),
+                "instanceTenancy": req.get("instanceTenancy", "default")
+            })
+            if "vpc" in res:
+                changes["details"]["vpcId"] = res["vpc"].get("vpcId")
+        
+        elif event_name == "ModifyVpcAttribute":
+            for key, value in req.items():
+                if key not in ["vpcId", "attribute"]:
+                    changes["details"][key] = value
+        
+        elif event_name == "CreateSubnet":
+            changes["details"].update({
+                "vpcId": req.get("vpcId"),
+                "cidrBlock": req.get("cidrBlock"),
+                "availabilityZone": req.get("availabilityZone")
+            })
+            if "subnet" in res:
+                changes["details"]["subnetId"] = res["subnet"].get("subnetId")
+        
+        elif event_name == "CreateInternetGateway":
+            if "internetGateway" in res:
+                changes["details"]["internetGatewayId"] = res["internetGateway"].get("internetGatewayId")
+        
+        elif event_name in ["AttachInternetGateway", "DetachInternetGateway"]:
+            changes["details"].update({
+                "vpcId": req.get("vpcId"),
+                "internetGatewayId": req.get("internetGatewayId")
+            })
+        
+        elif event_name == "CreateNatGateway":
+            changes["details"].update({
+                "subnetId": req.get("subnetId"),
+                "allocationId": req.get("allocationId")
+            })
+            if "natGateway" in res:
+                changes["details"]["natGatewayId"] = res["natGateway"].get("natGatewayId")
+    
     return changes
 
 def get_ec2_cloudtrail_events(region, credentials):
@@ -112,6 +191,10 @@ def get_ec2_cloudtrail_events(region, credentials):
 def get_rds_cloudtrail_events(region, credentials):
     """Obtiene eventos de CloudTrail relacionados con RDS."""
     return get_cloudtrail_events(region, credentials, "rds.amazonaws.com", IMPORTANT_RDS_EVENTS, "RDS")
+
+def get_vpc_cloudtrail_events(region, credentials):
+    """Obtiene eventos de CloudTrail relacionados con VPC."""
+    return get_cloudtrail_events(region, credentials, "ec2.amazonaws.com", IMPORTANT_VPC_EVENTS, "VPC")
 
 def get_cloudtrail_events(region, credentials, event_source, important_events, resource_type):
     """Obtiene eventos de CloudTrail según el tipo de recurso."""
@@ -196,6 +279,25 @@ def insert_or_update_cloudtrail_events(events):
             )
         """)
         table_exists = cursor.fetchone()[0]
+        
+        # Crear tabla si no existe
+        if not table_exists:
+            cursor.execute("""
+                CREATE TABLE cloudtrail_events (
+                    id SERIAL PRIMARY KEY,
+                    event_id VARCHAR(255) UNIQUE,
+                    event_time TIMESTAMP,
+                    event_name VARCHAR(255),
+                    event_source VARCHAR(255),
+                    user_name VARCHAR(255),
+                    resource_name VARCHAR(255),
+                    resource_type VARCHAR(50),
+                    region VARCHAR(50),
+                    changes JSONB,
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+            """)
+            conn.commit()
         
         # Insertar eventos
         for event in events:

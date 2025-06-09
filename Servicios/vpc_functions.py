@@ -1,15 +1,31 @@
 import boto3
 from botocore.exceptions import ClientError
-import pg8000
-import logging
-import sys
-import os
+from datetime import datetime
+from Servicios.utils import create_aws_client, get_db_connection
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-from config import DB_USER, DB_PASSWORD, DB_HOST, DB_NAME
-
-# logger = logging.getLogger(__name__)
+def get_vpc_changed_by(vpc_id, update_date):
+    """Busca el usuario que realizó el cambio más cercano a la fecha de actualización"""
+    conn = get_db_connection()
+    if not conn:
+        return "unknown"
+    
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT user_name FROM cloudtrail_events
+                WHERE resource_type = 'VPC' AND resource_name = %s 
+                AND ABS(EXTRACT(EPOCH FROM (event_time - %s))) < 86400
+                ORDER BY ABS(EXTRACT(EPOCH FROM (event_time - %s))) ASC LIMIT 1
+            """, (vpc_id, update_date, update_date))
+            
+            if result := cursor.fetchone():
+                return result[0]
+            return "unknown"
+    except Exception as e:
+        print(f"Error al buscar changed_by para VPC: {str(e)}")
+        return "unknown"
+    finally:
+        conn.close()
 
 def create_ec2_client(region, credentials):
     if not credentials or "error" in credentials:
@@ -27,7 +43,7 @@ def create_ec2_client(region, credentials):
         return None
 
 def get_vpc_details(region, credentials, account_id, account_name):
-    ec2_client = create_ec2_client(region, credentials)
+    ec2_client = create_aws_client("ec2", region, credentials)
     if not ec2_client:
         return []
 
@@ -88,46 +104,12 @@ def get_vpc_details(region, credentials, account_id, account_name):
         print(f"Error getting VPCs for account {account_id}: {str(e)}")
         return []
 
-def get_db_connection():
-    try:
-        return pg8000.connect(
-            user=DB_USER,
-            password=DB_PASSWORD,
-            host=DB_HOST,
-            port=5432,
-            database=DB_NAME
-        )
-    except Exception as e:
-        print(f"Database connection failed: {str(e)}")
-        return None
-
-def prepare_vpc_data_for_db(vpc_data):
-    return [(
-        item["VpcId"],
-        item.get("VpcName"),
-        item.get("CidrBlock"),
-        item.get("State"),
-        item.get("Region"),
-        item.get("Subnets", []),
-        item.get("SecurityGroups", []),
-        item.get("NetworkAcls", []),
-        item.get("InternetGateways", []),
-        item.get("VpnConnections", []),
-        item.get("VpcEndpoints", []),
-        item.get("VpcPeerings", []),
-        item.get("Tags", {}),  # sigue en JSON
-        item.get("AvailabilityZones", []),
-        item.get("RouteRules", 0),
-        item.get("AccountName"),
-        item.get("AccountID")
-    ) for item in vpc_data]
-
 def insert_or_update_vpc_data(vpc_data):
     if not vpc_data:
         return {"processed": 0, "inserted": 0, "updated": 0}
 
-    connection = get_db_connection()
-    if not connection:
+    conn = get_db_connection()
+    if not conn:
         return {
             "error": "Database connection failed",
             "processed": 0,
@@ -135,61 +117,136 @@ def insert_or_update_vpc_data(vpc_data):
             "updated": 0
         }
 
+    query_insert = """
+        INSERT INTO vpcs (
+            vpc_id, vpc_name, cidr_block, state,
+            region, subnets, security_groups, network_acls, internet_gateways,
+            vpn_connections, vpc_endpoints, vpc_peerings, tags, 
+            availability_zones, route_rules, account_name, account_id, last_updated
+        ) VALUES (
+            %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s,
+            %s, %s, CURRENT_TIMESTAMP
+        )
+    """
+
+    query_change_history = """
+        INSERT INTO vpc_changes_history (vpc_id, field_name, old_value, new_value, changed_by)
+        VALUES (%s, %s, %s, %s, %s)
+    """
+
+    inserted = 0
+    updated = 0
+    processed = 0
+
     try:
-        upsert_query = """
-            INSERT INTO vpcs (
-                vpc_id, vpc_name, cidr_block, state,
-                region, subnets, security_groups, network_acls, internet_gateways,
-                vpn_connections, vpc_endpoints, vpc_peerings, tags, 
-                availability_zones, route_rules, account_name, account_id, last_updated
-            ) VALUES (
-                %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s,
-                %s, %s, CURRENT_TIMESTAMP
+        cursor = conn.cursor()
+
+        # Verificar si la tabla de historial existe, si no, crearla
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_name = 'vpc_changes_history'
             )
-            ON CONFLICT (vpc_id)
-            DO UPDATE SET
-                vpc_name = EXCLUDED.vpc_name,
-                cidr_block = EXCLUDED.cidr_block,
-                state = EXCLUDED.state,
-                region = EXCLUDED.region,
-                subnets = EXCLUDED.subnets,
-                security_groups = EXCLUDED.security_groups,
-                network_acls = EXCLUDED.network_acls,
-                internet_gateways = EXCLUDED.internet_gateways,
-                vpn_connections = EXCLUDED.vpn_connections,
-                vpc_endpoints = EXCLUDED.vpc_endpoints,
-                vpc_peerings = EXCLUDED.vpc_peerings,
-                tags = EXCLUDED.tags,
-                availability_zones = EXCLUDED.availability_zones,
-                route_rules = EXCLUDED.route_rules,
-                account_name = EXCLUDED.account_name,
-                account_id = EXCLUDED.account_id,
-                last_updated = CURRENT_TIMESTAMP
-            RETURNING vpc_id, last_updated;
-        """
+        """)
+        if not cursor.fetchone()[0]:
+            cursor.execute("""
+                CREATE TABLE vpc_changes_history (
+                    id SERIAL PRIMARY KEY,
+                    vpc_id VARCHAR(255) NOT NULL,
+                    field_name VARCHAR(255) NOT NULL,
+                    old_value TEXT,
+                    new_value TEXT,
+                    changed_by VARCHAR(255),
+                    change_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.commit()
 
-        cursor = connection.cursor()
-        prepared_data = prepare_vpc_data_for_db(vpc_data)
-        cursor.executemany(upsert_query, prepared_data)
-        results = cursor.fetchall()
-        connection.commit()
+        # Obtener datos existentes
+        cursor.execute("SELECT * FROM vpcs")
+        columns = [desc[0].lower() for desc in cursor.description]
+        existing_data = {row[columns.index("vpc_id")]: dict(zip(columns, row)) for row in cursor.fetchall()}
 
-        processed = len(results)
+        for vpc in vpc_data:
+            vpc_id = vpc["VpcId"]
+            processed += 1
+
+            insert_values = (
+                vpc["VpcId"], vpc["VpcName"], vpc["CidrBlock"], vpc["State"],
+                vpc["Region"], vpc["Subnets"], vpc["SecurityGroups"], vpc["NetworkAcls"],
+                vpc["InternetGateways"], vpc["VpnConnections"], vpc["VpcEndpoints"],
+                vpc["VpcPeerings"], vpc["Tags"], vpc["AvailabilityZones"],
+                vpc["RouteRules"], vpc["AccountName"], vpc["AccountID"]
+            )
+
+            if vpc_id not in existing_data:
+                cursor.execute(query_insert, insert_values)
+                inserted += 1
+            else:
+                db_row = existing_data[vpc_id]
+                updates = []
+                values = []
+
+                campos = {
+                    "vpc_id": vpc["VpcId"],
+                    "vpc_name": vpc["VpcName"],
+                    "cidr_block": vpc["CidrBlock"],
+                    "state": vpc["State"],
+                    "region": vpc["Region"],
+                    "subnets": vpc["Subnets"],
+                    "security_groups": vpc["SecurityGroups"],
+                    "network_acls": vpc["NetworkAcls"],
+                    "internet_gateways": vpc["InternetGateways"],
+                    "vpn_connections": vpc["VpnConnections"],
+                    "vpc_endpoints": vpc["VpcEndpoints"],
+                    "vpc_peerings": vpc["VpcPeerings"],
+                    "tags": vpc["Tags"],
+                    "availability_zones": vpc["AvailabilityZones"],
+                    "route_rules": vpc["RouteRules"],
+                    "account_name": vpc["AccountName"],
+                    "account_id": vpc["AccountID"]
+                }
+
+                for col, new_val in campos.items():
+                    old_val = db_row.get(col)
+                    if str(old_val) != str(new_val):
+                        updates.append(f"{col} = %s")
+                        values.append(new_val)
+                        changed_by = get_vpc_changed_by(
+                            vpc_id=vpc_id,
+                            update_date=datetime.now()
+                        )
+                        
+                        cursor.execute(
+                            query_change_history,
+                            (vpc_id, col, str(old_val), str(new_val), changed_by)
+                        )
+
+                updates.append("last_updated = CURRENT_TIMESTAMP")
+
+                if updates:
+                    update_query = f"UPDATE vpcs SET {', '.join(updates)} WHERE vpc_id = %s"
+                    values.append(vpc_id)
+                    cursor.execute(update_query, tuple(values))
+                    updated += 1
+
+        conn.commit()
         return {
             "processed": processed,
-            "inserted": processed,
-            "updated": 0
+            "inserted": inserted,
+            "updated": updated
         }
+
     except Exception as e:
-        connection.rollback()
+        conn.rollback()
         print(f"Database operation failed: {str(e)}")
         return {
             "error": str(e),
-            "processed": 0,
-            "inserted": 0,
-            "updated": 0
+            "processed": processed,
+            "inserted": inserted,
+            "updated": updated
         }
     finally:
-        connection.close()
+        conn.close()
