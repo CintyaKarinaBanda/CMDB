@@ -12,7 +12,7 @@ def get_instance_changed_by(instance_id, update_date):
         with conn.cursor() as cursor:
             cursor.execute("""
                 SELECT user_name FROM cloudtrail_events
-                WHERE resource_category = 'EC2' AND resource_name = %s 
+                WHERE resource_type = 'EC2' AND resource_name = %s 
                 AND ABS(EXTRACT(EPOCH FROM (event_time - %s))) < 86400
                 ORDER BY ABS(EXTRACT(EPOCH FROM (event_time - %s))) ASC LIMIT 1
             """, (instance_id, update_date, update_date))

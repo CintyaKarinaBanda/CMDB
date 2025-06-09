@@ -197,25 +197,6 @@ def insert_or_update_cloudtrail_events(events):
         """)
         table_exists = cursor.fetchone()[0]
         
-        # Crear tabla si no existe
-        if not table_exists:
-            cursor.execute("""
-                CREATE TABLE cloudtrail_events (
-                    id SERIAL PRIMARY KEY,
-                    event_id VARCHAR(255) UNIQUE,
-                    event_time TIMESTAMP,
-                    event_name VARCHAR(255),
-                    event_source VARCHAR(255),
-                    user_name VARCHAR(255),
-                    resource_name VARCHAR(255),
-                    resource_type VARCHAR(50),
-                    region VARCHAR(50),
-                    changes JSONB,
-                    created_at TIMESTAMP DEFAULT NOW()
-                )
-            """)
-            conn.commit()
-        
         # Insertar eventos
         for event in events:
             try:
