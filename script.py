@@ -13,7 +13,7 @@ from Servicios import (
     get_vpc_details, insert_or_update_vpc_data,
     get_subnets_details, insert_or_update_subnet_data,
     get_ec2_cloudtrail_events, insert_or_update_cloudtrail_events,
-    get_rds_cloudtrail_events
+    get_rds_cloudtrail_events, get_vpc_cloudtrail_events
 )
 
 def assume_role(role_arn):
