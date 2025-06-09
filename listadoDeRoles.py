@@ -1,8 +1,5 @@
 ROLES = [
-    {"id": "729694432199", "role": "jira-health-event-monitoring-assume-role", "account": "infrapoc"},
-]
-
-"""{"id": "575750881751", "role": "ExtractData", "account": "aws-fiebredemalta-prod"},
+    {"id": "575750881751", "role": "ExtractData", "account": "aws-fiebredemalta-prod"},
     {"id": "901961295586", "role": "ExtractData", "account": "awspierrefabre"},
     {"id": "514621341182", "role": "ExtractData", "account": "aws-venturaentertrainment-dev"},
     {"id": "905418265750", "role": "ExtractData", "account": "aws-bayerreto1defensefile-poc"},
@@ -129,6 +126,6 @@ ROLES = [
     {"id": "816069138515", "role": "ExtractData", "account": "aws-clilogistics-audit"},
     {"id": "982081048005", "role": "ExtractData", "account": "aws-clilogistics-bi-prod"},
     {"id": "816069125662", "role": "ExtractData", "account": "aws-clilogistics-buckets-prod"}
-]"""
+]
 
 #{"id": "729694432199", "role": "service-role/CMDB-multiaccount-role-qzrheo7e", "account": "infrapoc"},
