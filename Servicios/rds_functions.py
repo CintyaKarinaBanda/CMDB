@@ -82,7 +82,7 @@ def insert_or_update_rds_data(rds_data):
     """
 
     query_change_history = """
-        INSERT INTO rds_changes_history (instance_id, field_name, old_value, new_value, changed_by)
+        INSERT INTO rds_changes_history (dbinstanceid, field_name, old_value, new_value, changed_by)
         VALUES (%s, %s, %s, %s, %s)
     """
 
