@@ -113,7 +113,7 @@ def main(services):
             grouped.setdefault(key, []).append(e["data"])
         
         for (reg, _), data in grouped.items():
-            res = insert_funcs[s](data, reg, entries[0]["credentials"])
+            res = insert_funcs[s](data)
             messages.append(
                 f"{s.upper()} ({reg}): {len(data)} items "
                 f"({res.get('inserted', 0)} insertados, {res.get('updated', 0)} actualizados)"

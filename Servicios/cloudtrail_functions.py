@@ -211,17 +211,18 @@ def get_ec2_cloudtrail_events(region, credentials):
         print(f"[CloudTrail] Error general: {str(e)}")
         return {"error": str(e), "events": []}
 
-def insert_or_update_cloudtrail_events(events, region, credentials):
+def insert_or_update_cloudtrail_events(events, resource_category = 'EC2'):
     """Inserta eventos de CloudTrail en la base de datos evitando duplicados."""
     if not (conn := get_db_connection()):
         return {"error": "Error al conectar a la base de datos", "inserted": 0}
 
     try:
         with conn.cursor() as cursor:
-            cursor.execute("SELECT id_event FROM ec2_cloudtrail_events")
+            cursor.execute("SELECT id_event FROM cloudtrail_events")
             existing_ids = {row[0] for row in cursor.fetchall()}
             
             to_insert = [
+                resource_category,
                 (e["event_id"], e["event_name"], e["event_time"], e["user_name"],
                 e["event_source"], e["resource_name"], json.dumps(e["changes"]))
                 for e in events
@@ -231,8 +232,8 @@ def insert_or_update_cloudtrail_events(events, region, credentials):
             if to_insert:
                 cursor.executemany("""
                     INSERT INTO ec2_cloudtrail_events
-                    (id_event, event_name, event_time, user_name, event_source, resource_name, changes)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    (resource_category, id_event, event_name, event_time, user_name, event_source, resource_name, changes)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """, to_insert)
                 inserted = cursor.rowcount
                 conn.commit()

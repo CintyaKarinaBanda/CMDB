@@ -1,33 +1,51 @@
-import boto3
 from botocore.exceptions import ClientError
-import pg8000
-import logging
-import sys
-import os
+from datetime import datetime
+from Servicios.utils import create_aws_client, get_db_connection
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-from config import DB_USER, DB_PASSWORD, DB_HOST, DB_NAME
-
-# logger = logging.getLogger(__name__)
-
-def create_rds_client(region, credentials):
-    if not credentials or "error" in credentials:
-        return None
+def get_instance_changed_by(instance_id, update_date):
+    """Busca el usuario que realizó el cambio más cercano a la fecha de actualización"""
+    conn = get_db_connection()
+    if not conn:
+        return "unknown"
+    
     try:
-        return boto3.client(
-            "rds",
-            region_name=region,
-            aws_access_key_id=credentials["AccessKeyId"],
-            aws_secret_access_key=credentials["SecretAccessKey"],
-            aws_session_token=credentials["SessionToken"]
-        )
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT user_name FROM cloudtrail_events
+                WHERE resource_category = 'RDS' AND resource_name = %s 
+                AND ABS(EXTRACT(EPOCH FROM (event_time - %s))) < 86400
+                ORDER BY ABS(EXTRACT(EPOCH FROM (event_time - %s))) ASC LIMIT 1
+            """, (instance_id, update_date, update_date))
+            
+            if result := cursor.fetchone():
+                return result[0]
+            return "unknown"
     except Exception as e:
-        print(f"Error creating RDS client: {str(e)}")
-        return None
+        print(f"Error al buscar changed_by: {str(e)}")
+        return "unknown"
+    finally:
+        conn.close()
+
+def extract_rds_data(db, account_name, account_id, region):
+    endpoint = db.get("Endpoint", {})
+    return {
+        "AccountName": account_name,
+        "AccountID": account_id,
+        "DbInstanceId": db["DBInstanceIdentifier"],
+        "DbName": db.get("DBName", "N/A"),
+        "EngineType": db["Engine"],
+        "EngineVersion": db.get("EngineVersion", "N/A"),
+        "StorageSize": db.get("AllocatedStorage", "N/A"),
+        "InstanceType": db["DBInstanceClass"],
+        "Status": db["DBInstanceStatus"],
+        "Region": region,
+        "Endpoint": endpoint.get("Address", "N/A"),
+        "Port": endpoint.get("Port", "N/A"),
+        "HasReplica": bool(db.get("ReadReplicaDBInstanceIdentifiers"))
+    }
 
 def get_rds_instances(region, credentials, account_id, account_name):
-    rds_client = create_rds_client(region, credentials)
+    rds_client = create_aws_client("rds", region, credentials)
     if not rds_client:
         return []
 
@@ -37,65 +55,28 @@ def get_rds_instances(region, credentials, account_id, account_name):
 
         for page in paginator.paginate():
             for db in page.get("DBInstances", []):
-                endpoint = db.get("Endpoint", {})
-                instances_info.append({
-                    "AccountName": account_name,
-                    "AccountID": account_id,
-                    "DbInstanceId": db["DBInstanceIdentifier"],
-                    "DbName": db.get("DBName", "N/A"),
-                    "EngineType": db["Engine"],
-                    "EngineVersion": db.get("EngineVersion", "N/A"),
-                    "StorageSize": db.get("AllocatedStorage", "N/A"),
-                    "InstanceType": db["DBInstanceClass"],
-                    "Status": db["DBInstanceStatus"],
-                    "Region": region,
-                    "Endpoint": endpoint.get("Address", "N/A"),
-                    "Port": endpoint.get("Port", "N/A"),
-                    "HasReplica": bool(db.get("ReadReplicaDBInstanceIdentifiers")),
-                })
+                info = extract_rds_data(db, account_name, account_id, region)
+                instances_info.append(info)
         return instances_info
     except ClientError as e:
-        print(f"Error getting RDS instances for account {account_id}: {str(e)}")
+        print(f"Error getting RDS instances: {str(e)}")
         return []
 
-def get_db_connection():
-    try:
-        return pg8000.connect(
-            user=DB_USER,
-            password=DB_PASSWORD,
-            host=DB_HOST,
-            port=5432,
-            database=DB_NAME
-        )
-    except Exception as e:
-        print(f"Database connection failed: {str(e)}")
-        return None
-
-def prepare_rds_data_for_db(rds_data):
-    return [(
-        item["AccountName"], item["AccountID"], item["DbInstanceId"],
-        item["DbName"], item["EngineType"], item["EngineVersion"],
-        item["StorageSize"], item["InstanceType"], item["Status"],
-        item["Region"], item["Endpoint"], item["Port"],
-        item["HasReplica"]
-    ) for item in rds_data]
-
-def insert_or_update_rds_data(rds_data, changed_by="system"):
+def insert_or_update_rds_data(rds_data):
     if not rds_data:
         return {"processed": 0, "inserted": 0, "updated": 0}
 
-    connection = get_db_connection()
-    if not connection:
+    conn = get_db_connection()
+    if not conn:
         return {"error": "DB connection failed", "processed": 0, "inserted": 0, "updated": 0}
 
     query_insert = """
-        NSERT INTO rds (
+        INSERT INTO rds (
             AccountName, AccountID, DbInstanceId, DbName, EngineType,
             EngineVersion, StorageSize, InstanceType, Status, Region,
             Endpoint, Port, HasReplica, last_updated
         ) VALUES (
-            %s, %s, %s, %s, %s,
-            %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
             %s, %s, %s, CURRENT_TIMESTAMP
         )
     """
@@ -104,19 +85,20 @@ def insert_or_update_rds_data(rds_data, changed_by="system"):
         INSERT INTO rds_changes_history (instance_id, field_name, old_value, new_value, changed_by)
         VALUES (%s, %s, %s, %s, %s)
     """
+
     inserted = 0
     updated = 0
-    processed = 0 
+    processed = 0
 
     try:
-        cursor = connection.cursor()
+        cursor = conn.cursor()
 
         cursor.execute("SELECT * FROM rds")
         columns = [desc[0].lower() for desc in cursor.description]
-        existing_data = {row[columns.index("DbInstanceId")]: dict(zip(columns, row)) for row in cursor.fetchall()}
+        existing_data = {row[columns.index("dbinstanceid")]: dict(zip(columns, row)) for row in cursor.fetchall()}
 
         for rds in rds_data:
-            DbInstanceId = rds["DbInstanceId"]
+            instance_id = rds["DbInstanceId"]
             processed += 1
 
             insert_values = (
@@ -127,11 +109,11 @@ def insert_or_update_rds_data(rds_data, changed_by="system"):
                 rds["HasReplica"]
             )
 
-            if DbInstanceId not in existing_data:
+            if instance_id not in existing_data:
                 cursor.execute(query_insert, insert_values)
                 inserted += 1
             else:
-                db_row = existing_data[DbInstanceId]
+                db_row = existing_data[instance_id]
                 updates = []
                 values = []
 
@@ -151,35 +133,39 @@ def insert_or_update_rds_data(rds_data, changed_by="system"):
                     "hasreplica": rds["HasReplica"]
                 }
 
-                for campo, valor in campos.items():
-                    if str(db_row.get(campo, "")).strip() != str(valor).strip():
-                        updates.append(f"{campo} = %s")
-                        values.append(valor)
+                for col, new_val in campos.items():
+                    old_val = db_row.get(col)
+                    if str(old_val) != str(new_val):
+                        updates.append(f"{col} = %s")
+                        values.append(new_val)
+                        changed_by = get_instance_changed_by(
+                            instance_id=instance_id,
+                            update_date=datetime.now()
+                        )
+                        
+                        cursor.execute(
+                            query_change_history,
+                            (instance_id, col, str(old_val), str(new_val), changed_by)
+                        )
+
+                updates.append("last_updated = CURRENT_TIMESTAMP")
 
                 if updates:
-                    values.append(DbInstanceId)
-                    update_query = f"""
-                        UPDATE rds
-                        SET {', '.join(updates)},
-                            last_updated = CURRENT_TIMESTAMP
-                        WHERE dbinstanceid = %s
-                    """
+                    update_query = f"UPDATE rds SET {', '.join(updates)} WHERE dbinstanceid = %s"
+                    values.append(instance_id)
+                    cursor.execute(update_query, tuple(values))
+                    updated += 1
 
-        connection.commit()
-
+        conn.commit()
         return {
             "processed": processed,
-            "inserted": processed,
-            "updated": 0
+            "inserted": inserted,
+            "updated": updated
         }
+
     except Exception as e:
-        connection.rollback()
-        print(f"Database operation failed: {str(e)}")
-        return {
-            "error": str(e),
-            "processed": 0,
-            "inserted": 0,
-            "updated": 0
-        }
+        conn.rollback()
+        print(f"DB operation failed: {str(e)}")
+        return {"error": str(e), "processed": 0, "inserted": 0, "updated": 0}
     finally:
-        connection.close()
+        conn.close()

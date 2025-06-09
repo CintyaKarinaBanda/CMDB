@@ -11,8 +11,9 @@ def get_instance_changed_by(instance_id, update_date):
     try:
         with conn.cursor() as cursor:
             cursor.execute("""
-                SELECT user_name FROM ec2_cloudtrail_events
-                WHERE resource_name = %s AND ABS(EXTRACT(EPOCH FROM (event_time - %s))) < 86400
+                SELECT user_name FROM cloudtrail_events
+                WHERE resource_category = 'EC2' AND resource_name = %s 
+                AND ABS(EXTRACT(EPOCH FROM (event_time - %s))) < 86400
                 ORDER BY ABS(EXTRACT(EPOCH FROM (event_time - %s))) ASC LIMIT 1
             """, (instance_id, update_date, update_date))
             
@@ -94,7 +95,7 @@ def get_ec2_instances(region, credentials, account_id, account_name):
         print(f"Error getting EC2 instances: {str(e)}")
         return []
 
-def insert_or_update_ec2_data(ec2_data, region, credentials=None):
+def insert_or_update_ec2_data(ec2_data):
     if not ec2_data:
         return {"processed": 0, "inserted": 0, "updated": 0}
 
