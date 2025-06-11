@@ -1,26 +1,32 @@
-# Servicios/cloudtrail_functions.py
 import json
 from datetime import datetime, timedelta
-from Servicios.utils import create_aws_client, get_db_connection
+from Servicios.utils import create_aws_client, get_db_connection, log, execute_db_query
 
 # Eventos importantes que queremos rastrear
-IMPORTANT_EC2_EVENTS = {
-    "StartInstances", "StopInstances", "RebootInstances", "TerminateInstances", 
-    "ModifyInstanceAttribute", "CreateTags", "DeleteTags", "RunInstances", 
-    "AttachVolume", "DetachVolume"
+IMPORTANT_EVENTS = {
+    "EC2": {
+        "StartInstances", "StopInstances", "RebootInstances", "TerminateInstances", 
+        "ModifyInstanceAttribute", "CreateTags", "DeleteTags", "RunInstances", 
+        "AttachVolume", "DetachVolume"
+    },
+    "RDS": {
+        "CreateDBInstance", "DeleteDBInstance", "ModifyDBInstance", "RebootDBInstance",
+        "StartDBInstance", "StopDBInstance", "RestoreDBInstanceFromDBSnapshot",
+        "CreateDBSnapshot", "DeleteDBSnapshot", "AddTagsToResource", "RemoveTagsFromResource"
+    },
+    "VPC": {
+        "CreateVpc", "DeleteVpc", "ModifyVpcAttribute", "CreateSubnet", "DeleteSubnet", 
+        "ModifySubnetAttribute", "CreateRouteTable", "DeleteRouteTable", "CreateRoute", 
+        "DeleteRoute", "CreateInternetGateway", "DeleteInternetGateway", "AttachInternetGateway", 
+        "DetachInternetGateway", "CreateNatGateway", "DeleteNatGateway"
+    }
 }
 
-IMPORTANT_RDS_EVENTS = {
-    "CreateDBInstance", "DeleteDBInstance", "ModifyDBInstance", "RebootDBInstance",
-    "StartDBInstance", "StopDBInstance", "RestoreDBInstanceFromDBSnapshot",
-    "CreateDBSnapshot", "DeleteDBSnapshot", "AddTagsToResource", "RemoveTagsFromResource"
-}
-
-IMPORTANT_VPC_EVENTS = {
-    "CreateVpc", "DeleteVpc", "ModifyVpcAttribute", "CreateSubnet", "DeleteSubnet", 
-    "ModifySubnetAttribute", "CreateRouteTable", "DeleteRouteTable", "CreateRoute", 
-    "DeleteRoute", "CreateInternetGateway", "DeleteInternetGateway", "AttachInternetGateway", 
-    "DetachInternetGateway", "CreateNatGateway", "DeleteNatGateway"
+# Mapeo de servicios a fuentes de eventos
+EVENT_SOURCES = {
+    "EC2": "ec2.amazonaws.com",
+    "RDS": "rds.amazonaws.com",
+    "VPC": "ec2.amazonaws.com"  # VPC usa el mismo source que EC2
 }
 
 def extract_resource_id(event, resource_type):
@@ -31,7 +37,7 @@ def extract_resource_id(event, resource_type):
     
     # Para recursos EC2
     if resource_type == "EC2":
-        # Buscar en lugares específicos según el tipo de evento
+        # Eventos de instancias
         if event_name in ["StartInstances", "StopInstances", "RebootInstances", "TerminateInstances"]:
             instances = req.get("instancesSet", {}).get("items", [])
             if instances and len(instances) > 0:
@@ -40,25 +46,25 @@ def extract_resource_id(event, resource_type):
         if event_name == "ModifyInstanceAttribute":
             return req.get("instanceId", "unknown")
         
-        # Buscar en campos comunes
+        # Campos comunes
         for key in ["instanceId", "resourceId"]:
             if key in req and req[key]:
                 return req[key]
     
     # Para recursos RDS
     elif resource_type == "RDS":
-        # Buscar en campos específicos de RDS
+        # Campos específicos de RDS
         if "dBInstanceIdentifier" in req:
             return req["dBInstanceIdentifier"]
         
         if "dBInstanceIdentifier" in res:
             return res["dBInstanceIdentifier"]
         
-        # Para eventos de snapshot
+        # Eventos de snapshot
         if "dBSnapshotIdentifier" in req:
             return req["dBSnapshotIdentifier"]
         
-        # Para eventos de tags
+        # Eventos de tags
         if event_name in ["AddTagsToResource", "RemoveTagsFromResource"]:
             resource_arn = req.get("resourceName")
             if resource_arn and "rds:db:" in resource_arn:
@@ -68,28 +74,28 @@ def extract_resource_id(event, resource_type):
     
     # Para recursos VPC
     elif resource_type == "VPC":
-        # Buscar en campos específicos de VPC
+        # Campos específicos de VPC
         if "vpcId" in req:
             return req["vpcId"]
         
         if "vpc" in res and "vpcId" in res["vpc"]:
             return res["vpc"]["vpcId"]
         
-        # Para eventos de subnet
+        # Eventos de subnet
         if "subnetId" in req:
             return req["subnetId"]
         
         if "subnet" in res and "subnetId" in res["subnet"]:
             return res["subnet"]["subnetId"]
         
-        # Para eventos de internet gateway
+        # Eventos de internet gateway
         if "internetGatewayId" in req:
             return req["internetGatewayId"]
         
         if "internetGateway" in res and "internetGatewayId" in res["internetGateway"]:
             return res["internetGateway"]["internetGatewayId"]
         
-        # Para eventos de NAT gateway
+        # Eventos de NAT gateway
         if "natGatewayId" in req:
             return req["natGatewayId"]
         
@@ -164,47 +170,35 @@ def extract_changes(event, resource_type):
             if "subnet" in res:
                 changes["details"]["subnetId"] = res["subnet"].get("subnetId")
         
-        elif event_name == "CreateInternetGateway":
-            if "internetGateway" in res:
-                changes["details"]["internetGatewayId"] = res["internetGateway"].get("internetGatewayId")
-        
-        elif event_name in ["AttachInternetGateway", "DetachInternetGateway"]:
-            changes["details"].update({
-                "vpcId": req.get("vpcId"),
-                "internetGatewayId": req.get("internetGatewayId")
-            })
-        
-        elif event_name == "CreateNatGateway":
-            changes["details"].update({
-                "subnetId": req.get("subnetId"),
-                "allocationId": req.get("allocationId")
-            })
-            if "natGateway" in res:
-                changes["details"]["natGatewayId"] = res["natGateway"].get("natGatewayId")
+        elif event_name in ["CreateInternetGateway", "AttachInternetGateway", "DetachInternetGateway", 
+                           "CreateNatGateway"]:
+            # Extraer detalles específicos según el tipo de evento
+            for key, value in req.items():
+                if key not in ["attribute"]:
+                    changes["details"][key] = value
+            
+            # Añadir IDs de recursos creados si están disponibles
+            for resource_key in ["internetGateway", "natGateway"]:
+                if resource_key in res and f"{resource_key}Id" in res[resource_key]:
+                    changes["details"][f"{resource_key}Id"] = res[resource_key].get(f"{resource_key}Id")
     
     return changes
 
-def get_ec2_cloudtrail_events(region, credentials):
-    """Obtiene eventos de CloudTrail relacionados con EC2."""
-    return get_cloudtrail_events(region, credentials, "ec2.amazonaws.com", IMPORTANT_EC2_EVENTS, "EC2")
-
-def get_rds_cloudtrail_events(region, credentials):
-    """Obtiene eventos de CloudTrail relacionados con RDS."""
-    return get_cloudtrail_events(region, credentials, "rds.amazonaws.com", IMPORTANT_RDS_EVENTS, "RDS")
-
-def get_vpc_cloudtrail_events(region, credentials):
-    """Obtiene eventos de CloudTrail relacionados con VPC."""
-    return get_cloudtrail_events(region, credentials, "ec2.amazonaws.com", IMPORTANT_VPC_EVENTS, "VPC")
-
-def get_cloudtrail_events(region, credentials, event_source, important_events, resource_type):
-    """Obtiene eventos de CloudTrail según el tipo de recurso."""
-    print(f"[CloudTrail] Consultando {resource_type} en región {region}")
-    
+def get_cloudtrail_events(region, credentials, resource_type):
+    """Obtiene eventos de CloudTrail para un tipo de recurso específico."""
     try:
         client = create_aws_client("cloudtrail", region, credentials)
         if not client:
             return {"error": f"Error al crear cliente CloudTrail para {resource_type}", "events": []}
 
+        # Obtener configuración específica para el tipo de recurso
+        event_source = EVENT_SOURCES.get(resource_type)
+        important_events = IMPORTANT_EVENTS.get(resource_type, set())
+        
+        if not event_source or not important_events:
+            return {"error": f"Tipo de recurso no soportado: {resource_type}", "events": []}
+
+        # Consultar eventos de los últimos 3 días
         start_time = datetime.utcnow() - timedelta(days=3)
         response = client.lookup_events(
             LookupAttributes=[{"AttributeKey": "EventSource", "AttributeValue": event_source}],
@@ -214,28 +208,25 @@ def get_cloudtrail_events(region, credentials, event_source, important_events, r
         )
         
         events = response.get("Events", [])
-        print(f"[CloudTrail] Eventos {resource_type} obtenidos: {len(events)}")
         
+        # Procesar eventos
         parsed_events = []
         for raw_event in events:
             try:
                 detail = json.loads(raw_event.get("CloudTrailEvent", "{}"))
                 event_name = detail.get("eventName")
                 
+                # Filtrar solo eventos importantes
                 if event_name not in important_events:
                     continue
                 
-                # Obtener usuario
+                # Extraer información relevante
                 user_identity = detail.get("userIdentity", {})
                 user_name = user_identity.get("userName") or user_identity.get("principalId") or "unknown"
-                
-                # Obtener recurso afectado
                 resource_name = extract_resource_id(detail, resource_type)
-                
-                # Extraer cambios
                 changes = extract_changes(detail, resource_type)
                 
-                parsed_event = {
+                parsed_events.append({
                     "event_id": raw_event.get("EventId"),
                     "event_time": raw_event.get("EventTime"),
                     "event_name": event_name,
@@ -245,95 +236,87 @@ def get_cloudtrail_events(region, credentials, event_source, important_events, r
                     "resource_type": resource_type,
                     "changes": changes,
                     "region": region
-                }
-                
-                parsed_events.append(parsed_event)
+                })
                 
             except Exception as e:
-                print(f"[CloudTrail] Error al procesar evento {resource_type}: {str(e)}")
+                log(f"ERROR: Procesar evento {resource_type} en {region}: {str(e)}")
         
+        if parsed_events:
+            log(f"INFO: CloudTrail {resource_type} en {region}: {len(parsed_events)} eventos encontrados")
         return {"events": parsed_events}
         
     except Exception as e:
-        print(f"[CloudTrail] Error general {resource_type}: {str(e)}")
+        log(f"ERROR: CloudTrail {resource_type} en {region}: {str(e)}")
         return {"error": str(e), "events": []}
+
+# Funciones específicas para cada tipo de recurso
+def get_ec2_cloudtrail_events(region, credentials):
+    return get_cloudtrail_events(region, credentials, "EC2")
+
+def get_rds_cloudtrail_events(region, credentials):
+    return get_cloudtrail_events(region, credentials, "RDS")
+
+def get_vpc_cloudtrail_events(region, credentials):
+    return get_cloudtrail_events(region, credentials, "VPC")
 
 def insert_or_update_cloudtrail_events(events):
     """Inserta eventos de CloudTrail en la base de datos."""
     if not events:
         return {"inserted": 0, "updated": 0}
     
-    conn = get_db_connection()
-    if not conn:
-        return {"error": "No se pudo conectar a la base de datos"}
+    # Verificar si la tabla existe, crearla si no
+    table_exists = execute_db_query("""
+        SELECT EXISTS (
+            SELECT FROM information_schema.tables 
+            WHERE table_name = 'cloudtrail_events'
+        )
+    """, fetch=True)
     
-    cursor = conn.cursor()
-    inserted = 0
-    
-    try:
-        # Verificar si la tabla existe
-        cursor.execute("""
-            SELECT EXISTS (
-                SELECT FROM information_schema.tables 
-                WHERE table_name = 'cloudtrail_events'
+    if not table_exists or not table_exists[0][0]:
+        result = execute_db_query("""
+            CREATE TABLE cloudtrail_events (
+                id SERIAL PRIMARY KEY,
+                event_id VARCHAR(255) UNIQUE,
+                event_time TIMESTAMP,
+                event_name VARCHAR(255),
+                event_source VARCHAR(255),
+                user_name VARCHAR(255),
+                resource_name VARCHAR(255),
+                resource_type VARCHAR(50),
+                region VARCHAR(50),
+                changes JSONB,
+                created_at TIMESTAMP DEFAULT NOW()
             )
         """)
-        table_exists = cursor.fetchone()[0]
-        
-        # Crear tabla si no existe
-        if not table_exists:
-            cursor.execute("""
-                CREATE TABLE cloudtrail_events (
-                    id SERIAL PRIMARY KEY,
-                    event_id VARCHAR(255) UNIQUE,
-                    event_time TIMESTAMP,
-                    event_name VARCHAR(255),
-                    event_source VARCHAR(255),
-                    user_name VARCHAR(255),
-                    resource_name VARCHAR(255),
-                    resource_type VARCHAR(50),
-                    region VARCHAR(50),
-                    changes JSONB,
-                    created_at TIMESTAMP DEFAULT NOW()
-                )
-            """)
-            conn.commit()
-        
-        # Insertar eventos
-        for event in events:
-            try:
-                cursor.execute(
-                    """
-                    INSERT INTO cloudtrail_events 
-                    (event_id, event_time, event_name, event_source, user_name, resource_name, 
-                     resource_type, region, changes, created_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
-                    ON CONFLICT (event_id) DO NOTHING
-                    """,
-                    (
-                        event["event_id"],
-                        event["event_time"],
-                        event["event_name"],
-                        event["event_source"],
-                        event["user_name"],
-                        event["resource_name"],
-                        event.get("resource_type", "EC2"),  # Por defecto EC2 para compatibilidad
-                        event["region"],
-                        json.dumps(event["changes"])
-                    )
-                )
-                inserted += 1
-            except Exception as e:
-                print(f"Error al insertar evento {event.get('event_id')}: {str(e)}")
-        
-        conn.commit()
-        return {"inserted": inserted, "updated": 0}
-        
-    except Exception as e:
-        conn.rollback()
-        print(f"Error al insertar eventos: {str(e)}")
-        return {"error": str(e), "inserted": 0, "updated": 0}
-        
-    finally:
-        cursor.close()
-        conn.close()
+        if "error" in result:
+            return {"error": result["error"], "inserted": 0, "updated": 0}
+        log("INFO: Tabla cloudtrail_events creada")
+    
+    # Preparar datos para inserción
+    prepared_data = [(
+        event["event_id"],
+        event["event_time"],
+        event["event_name"],
+        event["event_source"],
+        event["user_name"],
+        event["resource_name"],
+        event.get("resource_type", "EC2"),  # Por defecto EC2 para compatibilidad
+        event["region"],
+        json.dumps(event["changes"])
+    ) for event in events]
+    
+    # Insertar eventos
+    result = execute_db_query("""
+        INSERT INTO cloudtrail_events 
+        (event_id, event_time, event_name, event_source, user_name, resource_name, 
+         resource_type, region, changes, created_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+        ON CONFLICT (event_id) DO NOTHING
+        RETURNING event_id
+    """, prepared_data, many=True, fetch=True)
+    
+    if "error" in result:
+        return {"error": result["error"], "inserted": 0, "updated": 0}
+    
+    inserted = len(result)
+    return {"inserted": inserted, "updated": 0}

@@ -6,136 +6,163 @@ from botocore.exceptions import ClientError
 
 from listadoDeRoles import ROLES
 from config import Regions
-from Servicios import (
-    get_ec2_instances, insert_or_update_ec2_data,
-    get_rds_instances, insert_or_update_rds_data,
-    get_redshift_clusters, insert_or_update_redshift_data,
-    get_vpc_details, insert_or_update_vpc_data,
-    get_subnets_details, insert_or_update_subnet_data,
-    get_ec2_cloudtrail_events, insert_or_update_cloudtrail_events,
-    get_rds_cloudtrail_events, get_vpc_cloudtrail_events
-)
+from Servicios import *
+
+RESOURCES = ["ec2", "rds", "redshift", "vpc", "subnets"]
+EVENTS = ["ec2_cloudtrail", "rds_cloudtrail", "vpc_cloudtrail"]
+DEPENDENCIES = {"ec2_cloudtrail": "ec2", "rds_cloudtrail": "rds", "vpc_cloudtrail": "vpc"}
 
 def assume_role(role_arn):
     """Asume un rol IAM y devuelve credenciales temporales."""
     try:
         creds = boto3.client("sts").assume_role(
             RoleArn=role_arn,
-            RoleSessionName=f"EC2Session-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
+            RoleSessionName=f"Session-{datetime.now().strftime('%H%M%S')}",
             DurationSeconds=900
         )["Credentials"]
         return {k: creds[k] for k in ["AccessKeyId", "SecretAccessKey", "SessionToken"]}
     except ClientError as e:
-        print(f"Error al asumir el rol {role_arn}: {str(e)}")
+        log(f"ERROR: Rol {role_arn}: {e}")
         return {"error": str(e)}
 
 def process_account_region(account_id, role_name, account_name, region, services):
     """Procesa una combinación de cuenta/región para los servicios solicitados."""
+    
     start = datetime.now()
     creds = assume_role(f"arn:aws:iam::{account_id}:role/{role_name}")
     if "error" in creds:
-        print(f"[{account_id}:{region}] Error al asumir rol: {creds['error']}")
         return {"account_id": account_id, "region": region, "error": creds["error"]}
 
-    service_funcs = {
-        "ec2": lambda: get_ec2_instances(region, creds, account_id, account_name),
-        "rds": lambda: get_rds_instances(region, creds, account_id, account_name),
-        "redshift": lambda: get_redshift_clusters(region, creds, account_id, account_name),
-        "vpc": lambda: get_vpc_details(region, creds, account_id, account_name),
-        "subnets": lambda: get_subnets_details(region, creds, account_id, account_name),
-        "ec2_cloudtrail": lambda: get_ec2_cloudtrail_events(region, creds).get("events", []),
-        "rds_cloudtrail": lambda: get_rds_cloudtrail_events(region, creds).get("events", []),
-        "vpc_cloudtrail": lambda: get_vpc_cloudtrail_events(region, creds).get("events", [])
-    }
-
+    ordered_services = [s for s in services if s in RESOURCES] + [s for s in services if s in EVENTS]
     result = {"account_id": account_id, "region": region, "credentials": creds}
-    for service in services:
+    
+    for service in ordered_services:
         if (datetime.now() - start).total_seconds() > 300:  # 5 min timeout
-            print(f"[{account_id}:{region}] Tiempo límite excedido")
+            log(f"TIMEOUT: {account_id}:{region}")
             break
         try:
-            key = f"{service}_data" if service != "cloudtrail_events" else service
-            result[key] = service_funcs.get(service, lambda: [])()
+            if service in RESOURCES:
+                func_name = f"get_{service}_instances" if service not in ["vpc", "subnets"] else f"get_{service}_details"
+                data = globals()[func_name](region, creds, account_id, account_name)
+                result[f"{service}_data"] = data
+            else:
+                func_name = f"get_{service}"
+                data = globals()[func_name](region, creds).get("events", [])
+                result[service] = data
         except Exception as e:
-            print(f"[{account_id}:{region}] Error en {service}: {str(e)}")
+            log(f"ERROR: {account_id}:{region} - {service}: {str(e)}")
     
-    print(f"[{account_id}:{region}] Completado en {(datetime.now() - start).total_seconds():.2f}s")
+    return result
+
+def insert_service_data(service, data, region):
+    """Inserta datos de un servicio en la base de datos."""
+    
+    if not data:
+        return f"{service.upper()}: No hay datos para insertar"
+    
+    if service.endswith("_cloudtrail"):
+        res = insert_or_update_cloudtrail_events(data)
+    else:
+        func_name = f"insert_or_update_{service}_data"
+        res = globals()[func_name](data)
+    
+    return f"{service.upper()} ({region}): {len(data)} items ({res.get('inserted', 0)} insertados, {res.get('updated', 0)} actualizados)"
+
+def resolve_dependencies(services):
+    """Añade dependencias necesarias a la lista de servicios."""
+
+    result = list(services)
+    for service in services:
+        if service in EVENTS and DEPENDENCIES.get(service) not in result:
+            result.append(DEPENDENCIES[service])
+            log(f"INFO: Añadiendo {DEPENDENCIES[service]} como dependencia de {service}")
     return result
 
 def main(services):
     """Función principal que coordina la recolección de datos."""
+
     start = datetime.now()
-    print(f"=== Iniciando proceso: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===")
-    print(f"Servicios: {', '.join(services)}")
+    log(f"INICIO: Procesando servicios: {', '.join(services)}")
 
-    errors, collected_data, messages = {}, {s: [] for s in services}, []
-    max_workers = min(10, len(ROLES) * len(Regions))
+    all_services = resolve_dependencies(services)
+    errors, data_by_service_region = {}, {}
     total_jobs = len(ROLES) * len(Regions)
-
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    
+    with ThreadPoolExecutor(max_workers=min(10, total_jobs)) as executor:
         futures = [
-            executor.submit(process_account_region, r["id"], r["role"], 
-                          r["account"], reg, services)
+            executor.submit(process_account_region, r["id"], r["role"], r["account"], reg, all_services)
             for r in ROLES for reg in Regions
         ]
         
         for i, future in enumerate(as_completed(futures), 1):
             res = future.result()
-            print(f"[Progreso] {i}/{total_jobs} ({i/total_jobs*100:.1f}%)")
+            if i % 10 == 0 or i == total_jobs:  # Reducir logs de progreso
+                log(f"PROGRESO: {i}/{total_jobs} ({i/total_jobs*100:.1f}%)")
             
             if "error" in res:
                 errors.setdefault(res["account_id"], []).append(f"{res['region']}: {res['error']}")
                 continue
             
-            for s in services:
-                key = f"{s}_data" if s != "cloudtrail_events" else s
-                collected_data[s].extend([{
-                    "data": d, "credentials": res["credentials"],
-                    "region": res["region"], "account_id": res["account_id"]
-                } for d in res.get(key, [])])
+            for s in all_services:
+                key = f"{s}_data" if s in RESOURCES else s
+                if key in res and res[key]:
+                    service_key = (s, res["region"])
+                    if service_key not in data_by_service_region:
+                        data_by_service_region[service_key] = []
+                    data_by_service_region[service_key].extend(res[key])
 
-    insert_funcs = {
-        "ec2": insert_or_update_ec2_data,
-        "rds": insert_or_update_rds_data,
-        "redshift": insert_or_update_redshift_data,
-        "vpc": insert_or_update_vpc_data,
-        "subnets": insert_or_update_subnet_data,
-        "ec2_cloudtrail": insert_or_update_cloudtrail_events,
-        "rds_cloudtrail": insert_or_update_cloudtrail_events,
-        "vpc_cloudtrail": insert_or_update_cloudtrail_events
-    }
-
-    print("\n=== Insertando datos en la base de datos ===")
-    for s in services:
-        entries = collected_data.get(s, [])
-        if not entries:
-            messages.append(f"{s.upper()}: No hay datos para insertar")
-            continue
-        
-        grouped = {}
-        for e in entries:
-            key = (e["region"], tuple(sorted(e["credentials"].items())))
-            grouped.setdefault(key, []).append(e["data"])
-        
-        for (reg, _), data in grouped.items():
-            res = insert_funcs[s](data)
-            messages.append(
-                f"{s.upper()} ({reg}): {len(data)} items "
-                f"({res.get('inserted', 0)} insertados, {res.get('updated', 0)} actualizados)"
-            )
-
-    print("\n=== Resultados ===")
-    print("\n".join(messages))
-    if errors:
-        print(f"\nErrores en {len(errors)} cuentas:")
-        for acc, errs in errors.items():
-            print(f"- Cuenta {acc}: {len(errs)} errores")
+    log("INSERCIÓN: Iniciando inserción en base de datos")
+    results = []
     
-    print(f"\n=== Proceso completado en {(datetime.now() - start).total_seconds():.2f} segundos ===")
+    for group in [RESOURCES, EVENTS]:
+        for service in [s for s in group if s in all_services]:
+            for (svc, region), data in data_by_service_region.items():
+                if svc == service and data:
+                    result = insert_service_data(service, data, region)
+                    results.append(result)
+                    log(f"RESULTADO: {result}")
+
+    if errors:
+        log(f"ERRORES: {len(errors)} cuentas con errores, {sum(len(e) for e in errors.values())} total")
+    
+    duration = (datetime.now() - start).total_seconds()
+    log(f"FIN: Proceso completado en {duration:.2f} segundos")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Recolecta información de recursos AWS')
-    parser.add_argument('--services', nargs='+', default=["ec2", "ec2_cloudtrail"],
-                      choices=["ec2", "rds", "redshift", "vpc", "subnets", "ec2_cloudtrail", "rds_cloudtrail", "vpc_cloudtrail"],
-                      help='Servicios a consultar')
-    main(parser.parse_args().services)
+    
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('--all', action='store_true', help='Procesar todos los servicios')
+    group.add_argument('--ec2', action='store_true', help='Procesar EC2 y sus eventos')
+    group.add_argument('--rds', action='store_true', help='Procesar RDS y sus eventos')
+    group.add_argument('--vpc', action='store_true', help='Procesar VPC y sus eventos')
+    
+    parser.add_argument('--services', nargs='+', default=[],
+                      choices=RESOURCES + EVENTS,
+                      help='Servicios específicos a consultar')
+    parser.add_argument('--quiet', action='store_true', help='Reducir mensajes de log')
+    
+    args = parser.parse_args()
+    
+    # Configurar nivel de log
+    if args.quiet:
+        def log(msg):
+            if any(level in msg for level in ["ERROR", "INICIO", "FIN"]):
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                print(f"[{timestamp}] {msg}")
+    
+    # Determinar servicios
+    if args.all:
+        services = RESOURCES + EVENTS
+    elif args.ec2:
+        services = ["ec2", "ec2_cloudtrail"]
+    elif args.rds:
+        services = ["rds", "rds_cloudtrail"]
+    elif args.vpc:
+        services = ["vpc", "vpc_cloudtrail"]
+    elif args.services:
+        services = args.services
+    else:
+        services = ["ec2", "ec2_cloudtrail"]
+    
+    main(services)
