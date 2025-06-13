@@ -6,7 +6,7 @@ from botocore.exceptions import ClientError
 
 from listadoDeRoles import ROLES
 from config import Regions
-from Servicios import (
+from services import (
     get_ec2_instances, insert_or_update_ec2_data,
     get_rds_instances, insert_or_update_rds_data,
     get_redshift_clusters, insert_or_update_redshift_data,

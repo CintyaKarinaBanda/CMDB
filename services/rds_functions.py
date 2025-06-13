@@ -1,6 +1,6 @@
 from botocore.exceptions import ClientError
 from datetime import datetime
-from Servicios.utils import create_aws_client, get_db_connection
+from services.utils import create_aws_client, get_db_connection
 
 def get_instance_changed_by(instance_id, update_date):
     """Busca el usuario que realizó el cambio más cercano a la fecha de actualización"""
@@ -21,7 +21,7 @@ def get_instance_changed_by(instance_id, update_date):
                 return result[0]
             return "unknown"
     except Exception as e:
-        print(f"Error al buscar changed_by: {str(e)}")
+        print(f"[ERROR] changed_by: {instance_id} - {str(e)}")
         return "unknown"
     finally:
         conn.close()

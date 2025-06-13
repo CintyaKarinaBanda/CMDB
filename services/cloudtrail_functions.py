@@ -1,7 +1,7 @@
 # Servicios/cloudtrail_functions.py
 import json
 from datetime import datetime, timedelta
-from Servicios.utils import create_aws_client, get_db_connection
+from services.utils import create_aws_client, get_db_connection
 
 # Eventos importantes que queremos rastrear
 IMPORTANT_EC2_EVENTS = {
@@ -198,8 +198,6 @@ def get_vpc_cloudtrail_events(region, credentials):
 
 def get_cloudtrail_events(region, credentials, event_source, important_events, resource_type):
     """Obtiene eventos de CloudTrail según el tipo de recurso."""
-    print(f"[CloudTrail] Consultando {resource_type} en región {region}")
-    
     try:
         client = create_aws_client("cloudtrail", region, credentials)
         if not client:
@@ -214,7 +212,6 @@ def get_cloudtrail_events(region, credentials, event_source, important_events, r
         )
         
         events = response.get("Events", [])
-        print(f"[CloudTrail] Eventos {resource_type} obtenidos: {len(events)}")
         
         parsed_events = []
         for raw_event in events:
@@ -250,12 +247,12 @@ def get_cloudtrail_events(region, credentials, event_source, important_events, r
                 parsed_events.append(parsed_event)
                 
             except Exception as e:
-                print(f"[CloudTrail] Error al procesar evento {resource_type}: {str(e)}")
+                print(f"[ERROR] Evento {resource_type}: {str(e)}")
         
         return {"events": parsed_events}
         
     except Exception as e:
-        print(f"[CloudTrail] Error general {resource_type}: {str(e)}")
+        print(f"[ERROR] CloudTrail {resource_type}: {str(e)}")
         return {"error": str(e), "events": []}
 
 def insert_or_update_cloudtrail_events(events):
@@ -324,14 +321,14 @@ def insert_or_update_cloudtrail_events(events):
                 )
                 inserted += 1
             except Exception as e:
-                print(f"Error al insertar evento {event.get('event_id')}: {str(e)}")
+                print(f"[ERROR] DB: evento_id={event.get('event_id')} - {str(e)}")
         
         conn.commit()
         return {"inserted": inserted, "updated": 0}
         
     except Exception as e:
         conn.rollback()
-        print(f"Error al insertar eventos: {str(e)}")
+        print(f"[ERROR] DB: {str(e)}")
         return {"error": str(e), "inserted": 0, "updated": 0}
         
     finally:

@@ -1,5 +1,5 @@
 from botocore.exceptions import ClientError
-from Servicios.utils import create_aws_client, get_db_connection, log
+from services.utils import create_aws_client, get_db_connection, log
 
 def get_subnets_details(region, credentials, account_id, account_name):
     ec2 = create_aws_client("ec2", region, credentials)

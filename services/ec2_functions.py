@@ -1,6 +1,6 @@
 from botocore.exceptions import ClientError
 from datetime import datetime
-from Servicios.utils import create_aws_client, get_db_connection
+from services.utils import create_aws_client, get_db_connection
 
 def get_instance_changed_by(instance_id, update_date):
     """Busca el usuario que realizó el cambio más cercano a la fecha de actualización"""
@@ -21,7 +21,7 @@ def get_instance_changed_by(instance_id, update_date):
                 return result[0]
             return "unknown"
     except Exception as e:
-        print(f"Error al buscar changed_by: {str(e)}")
+        print(f"[ERROR] changed_by: {instance_id} - {str(e)}")
         return "unknown"
     finally:
         conn.close()
@@ -32,7 +32,7 @@ def get_vpc_name(ec2_client, vpc_id):
         tag = next((t["Value"] for t in vpc.get("Tags", []) if t["Key"] == "Name"), None)
         return f"{vpc_id} ({tag})" if tag else vpc_id
     except ClientError:
-        print(f"Failed to get VPC name for {vpc_id}")
+        print(f"[ERROR] VPC: {vpc_id}")
         return vpc_id
 
 def get_platform_details(ec2_client, instance_id):
@@ -48,10 +48,10 @@ def get_platform_details(ec2_client, instance_id):
                 image = ec2_client.describe_images(ImageIds=[image_id])['Images'][0]
                 return image.get('Description', 'Linux/UNIX')
             except ClientError:
-                print(f"Failed to get image details for {image_id}")
+                print(f"[ERROR] ImageID: {image_id}")
         return 'Linux/UNIX'
     except ClientError as e:
-        print(f"Error getting platform details: {str(e)}")
+        print(f"[ERROR] Platform: {instance_id}")
         return 'Unavailable'
 
 def extract_instance_data(instance, ec2_client, account_name, account_id, region):
@@ -92,7 +92,7 @@ def get_ec2_instances(region, credentials, account_id, account_name):
                     instances_info.append(info)
         return instances_info
     except ClientError as e:
-        print(f"Error getting EC2 instances: {str(e)}")
+        print(f"[ERROR] EC2: {region}/{account_id}")
         return []
 
 def insert_or_update_ec2_data(ec2_data):
@@ -204,7 +204,7 @@ def insert_or_update_ec2_data(ec2_data):
 
     except Exception as e:
         conn.rollback()
-        print(f"DB operation failed: {str(e)}")
+        print(f"[ERROR] DB: ec2_data - {str(e)}")
         return {"error": str(e), "processed": 0, "inserted": 0, "updated": 0}
     finally:
         conn.close()

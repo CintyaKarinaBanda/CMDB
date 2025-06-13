@@ -1,7 +1,7 @@
 import boto3
 from botocore.exceptions import ClientError
 from datetime import datetime
-from Servicios.utils import create_aws_client, get_db_connection
+from services.utils import create_aws_client, get_db_connection
 
 def get_vpc_changed_by(vpc_id, update_date):
     """Busca el usuario que realizó el cambio más cercano a la fecha de actualización"""
@@ -22,7 +22,7 @@ def get_vpc_changed_by(vpc_id, update_date):
                 return result[0]
             return "unknown"
     except Exception as e:
-        print(f"Error al buscar changed_by para VPC: {str(e)}")
+        print(f"[ERROR] changed_by: {vpc_id} - {str(e)}")
         return "unknown"
     finally:
         conn.close()
@@ -101,7 +101,7 @@ def get_vpc_details(region, credentials, account_id, account_name):
         return vpcs_info
     
     except ClientError as e:
-        print(f"Error getting VPCs for account {account_id}: {str(e)}")
+        print(f"[ERROR] VPC: {region}/{account_id}")
         return []
 
 def insert_or_update_vpc_data(vpc_data):
@@ -241,7 +241,7 @@ def insert_or_update_vpc_data(vpc_data):
 
     except Exception as e:
         conn.rollback()
-        print(f"Database operation failed: {str(e)}")
+        print(f"[ERROR] DB: vpc_data - {str(e)}")
         return {
             "error": str(e),
             "processed": processed,
