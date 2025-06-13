@@ -4,4 +4,3 @@ from Servicios.rds_functions import get_rds_instances, insert_or_update_rds_data
 from Servicios.redshift_functions import get_redshift_clusters, insert_or_update_redshift_data
 from Servicios.vpc_functions import get_vpc_details, insert_or_update_vpc_data
 from Servicios.subnets_functions import get_subnets_details, insert_or_update_subnet_data
-from Servicios.utils import log

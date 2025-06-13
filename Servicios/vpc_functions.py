@@ -1,6 +1,7 @@
+import boto3
 from botocore.exceptions import ClientError
 from datetime import datetime
-from Servicios.utils import create_aws_client, get_db_connection, log
+from Servicios.utils import create_aws_client, get_db_connection
 
 def get_vpc_changed_by(vpc_id, update_date):
     """Busca el usuario que realizó el cambio más cercano a la fecha de actualización"""
@@ -17,36 +18,29 @@ def get_vpc_changed_by(vpc_id, update_date):
                 ORDER BY ABS(EXTRACT(EPOCH FROM (event_time - %s))) ASC LIMIT 1
             """, (vpc_id, update_date, update_date))
             
-            return cursor.fetchone()[0] if cursor.fetchone() else "unknown"
+            if result := cursor.fetchone():
+                return result[0]
+            return "unknown"
     except Exception as e:
-        log(f"ERROR: Buscar changed_by para VPC {vpc_id}: {str(e)}")
+        print(f"Error al buscar changed_by para VPC: {str(e)}")
         return "unknown"
     finally:
         conn.close()
 
-def get_vpc_resources(ec2_client, vpc_id):
-    """Obtiene recursos asociados a una VPC"""
-    vpc_filter = [{'Name': 'vpc-id', 'Values': [vpc_id]}]
-    
-    # Obtener todos los recursos en una sola función
-    resources = {
-        "subnets": [s['SubnetId'] for s in ec2_client.describe_subnets(Filters=vpc_filter).get('Subnets', [])],
-        "security_groups": [sg['GroupId'] for sg in ec2_client.describe_security_groups(Filters=vpc_filter).get('SecurityGroups', [])],
-        "network_acls": [acl['NetworkAclId'] for acl in ec2_client.describe_network_acls(Filters=vpc_filter).get('NetworkAcls', [])],
-        "internet_gateways": [igw['InternetGatewayId'] for igw in ec2_client.describe_internet_gateways(
-            Filters=[{'Name': 'attachment.vpc-id', 'Values': [vpc_id]}]).get('InternetGateways', [])],
-        "vpn_connections": [vpn['VpnConnectionId'] for vpn in ec2_client.describe_vpn_connections(Filters=vpc_filter).get('VpnConnections', [])],
-        "vpc_endpoints": [ep['VpcEndpointId'] for ep in ec2_client.describe_vpc_endpoints(Filters=vpc_filter).get('VpcEndpoints', [])],
-        "vpc_peerings": [pc['VpcPeeringConnectionId'] for pc in ec2_client.describe_vpc_peering_connections(
-            Filters=[{'Name': 'requester-vpc-info.vpc-id', 'Values': [vpc_id]}]).get('VpcPeeringConnections', [])],
-        "route_tables": [rt['RouteTableId'] for rt in ec2_client.describe_route_tables(Filters=vpc_filter).get('RouteTables', [])]
-    }
-    
-    # Obtener zonas de disponibilidad
-    resources["availability_zones"] = list(set(subnet['AvailabilityZone'] 
-                                           for subnet in ec2_client.describe_subnets(Filters=vpc_filter).get('Subnets', [])))
-    
-    return resources
+def create_ec2_client(region, credentials):
+    if not credentials or "error" in credentials:
+        return None
+    try:
+        return boto3.client(
+            "ec2",
+            region_name=region,
+            aws_access_key_id=credentials["AccessKeyId"],
+            aws_secret_access_key=credentials["SecretAccessKey"],
+            aws_session_token=credentials["SessionToken"]
+        )
+    except Exception as e:
+        print(f"Error creating EC2 client: {str(e)}")
+        return None
 
 def get_vpc_details(region, credentials, account_id, account_name):
     ec2_client = create_aws_client("ec2", region, credentials)
@@ -58,35 +52,56 @@ def get_vpc_details(region, credentials, account_id, account_name):
         vpcs_info = []
 
         for vpc in vpcs:
-            vpc_id = vpc['VpcId']
-            resources = get_vpc_resources(ec2_client, vpc_id)
+            subnets = ec2_client.describe_subnets(Filters=[{'Name': 'vpc-id', 'Values': [vpc['VpcId']]}])
+            subnet_ids = [subnet['SubnetId'] for subnet in subnets.get('Subnets', [])]
+            
+            security_groups = ec2_client.describe_security_groups(Filters=[{'Name': 'vpc-id', 'Values': [vpc['VpcId']]}])
+            sg_ids = [sg['GroupId'] for sg in security_groups.get('SecurityGroups', [])]
+            
+            network_acls = ec2_client.describe_network_acls(Filters=[{'Name': 'vpc-id', 'Values': [vpc['VpcId']]}])
+            acl_ids = [acl['NetworkAclId'] for acl in network_acls.get('NetworkAcls', [])]
+            
+            igws = ec2_client.describe_internet_gateways(Filters=[{'Name': 'attachment.vpc-id', 'Values': [vpc['VpcId']]}])
+            igw_ids = [igw['InternetGatewayId'] for igw in igws.get('InternetGateways', [])]
+            
+            vpn_connections = ec2_client.describe_vpn_connections(Filters=[{'Name': 'vpc-id', 'Values': [vpc['VpcId']]}])
+            vpn_ids = [vpn['VpnConnectionId'] for vpn in vpn_connections.get('VpnConnections', [])]
+            
+            vpc_endpoints = ec2_client.describe_vpc_endpoints(Filters=[{'Name': 'vpc-id', 'Values': [vpc['VpcId']]}])
+            endpoint_ids = [endpoint['VpcEndpointId'] for endpoint in vpc_endpoints.get('VpcEndpoints', [])]
+            
+            vpc_peerings = ec2_client.describe_vpc_peering_connections(Filters=[{'Name': 'requester-vpc-info.vpc-id', 'Values': [vpc['VpcId']]}])
+            peering_ids = [peering['VpcPeeringConnectionId'] for peering in vpc_peerings.get('VpcPeeringConnections', [])]
+            
+            route_tables = ec2_client.describe_route_tables(Filters=[{'Name': 'vpc-id', 'Values': [vpc['VpcId']]}])
+            route_table_ids = [rt['RouteTableId'] for rt in route_tables.get('RouteTables', [])]
+            
+            azs = list(set(subnet['AvailabilityZone'] for subnet in subnets.get('Subnets', [])))
             
             vpcs_info.append({
                 "AccountName": account_name,
                 "AccountID": account_id,
-                "VpcId": vpc_id,
+                "VpcId": vpc['VpcId'],
                 "VpcName": next((tag['Value'] for tag in vpc.get('Tags', []) if tag['Key'] == 'Name'), "N/A"),
                 "CidrBlock": vpc['CidrBlock'],
                 "State": vpc['State'],
                 "Region": region,
-                "Subnets": resources["subnets"],
-                "SecurityGroups": resources["security_groups"],
-                "NetworkAcls": resources["network_acls"],
-                "InternetGateways": resources["internet_gateways"],
-                "VpnConnections": resources["vpn_connections"],
-                "VpcEndpoints": resources["vpc_endpoints"],
-                "VpcPeerings": resources["vpc_peerings"],
+                "Subnets": subnet_ids,
+                "SecurityGroups": sg_ids,
+                "NetworkAcls": acl_ids,
+                "InternetGateways": igw_ids,
+                "VpnConnections": vpn_ids,
+                "VpcEndpoints": endpoint_ids,
+                "VpcPeerings": peering_ids,
                 "Tags": vpc.get('Tags', []),
-                "AvailabilityZones": resources["availability_zones"],
-                "RouteRules": resources["route_tables"]
+                "AvailabilityZones": azs,
+                "RouteRules": route_table_ids
             })
         
-        if vpcs_info:
-            log(f"INFO: VPC en {region}: {len(vpcs_info)} VPCs encontradas")
         return vpcs_info
     
     except ClientError as e:
-        log(f"ERROR: Obtener VPCs en {region} para cuenta {account_id}: {str(e)}")
+        print(f"Error getting VPCs for account {account_id}: {str(e)}")
         return []
 
 def insert_or_update_vpc_data(vpc_data):
@@ -95,14 +110,25 @@ def insert_or_update_vpc_data(vpc_data):
 
     conn = get_db_connection()
     if not conn:
-        return {"error": "Database connection failed", "processed": 0, "inserted": 0, "updated": 0}
+        return {
+            "error": "Database connection failed",
+            "processed": 0,
+            "inserted": 0,
+            "updated": 0
+        }
 
     query_insert = """
         INSERT INTO vpcs (
-            vpc_id, vpc_name, cidr_block, state, region, subnets, security_groups, 
-            network_acls, internet_gateways, vpn_connections, vpc_endpoints, vpc_peerings, 
-            tags, availability_zones, route_rules, account_name, account_id, last_updated
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+            vpc_id, vpc_name, cidr_block, state,
+            region, subnets, security_groups, network_acls, internet_gateways,
+            vpn_connections, vpc_endpoints, vpc_peerings, tags, 
+            availability_zones, route_rules, account_name, account_id, last_updated
+        ) VALUES (
+            %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s,
+            %s, %s, CURRENT_TIMESTAMP
+        )
     """
 
     query_change_history = """
@@ -110,23 +136,33 @@ def insert_or_update_vpc_data(vpc_data):
         VALUES (%s, %s, %s, %s, %s)
     """
 
-    inserted, updated, processed = 0, 0, 0
+    inserted = 0
+    updated = 0
+    processed = 0
 
     try:
         cursor = conn.cursor()
 
-        # Verificar y crear tabla de historial si es necesario
-        cursor.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'vpc_changes_history')")
+        # Verificar si la tabla de historial existe, si no, crearla
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_name = 'vpc_changes_history'
+            )
+        """)
         if not cursor.fetchone()[0]:
             cursor.execute("""
                 CREATE TABLE vpc_changes_history (
-                    id SERIAL PRIMARY KEY, vpc_id VARCHAR(255) NOT NULL, field_name VARCHAR(255) NOT NULL,
-                    old_value TEXT, new_value TEXT, changed_by VARCHAR(255),
+                    id SERIAL PRIMARY KEY,
+                    vpc_id VARCHAR(255) NOT NULL,
+                    field_name VARCHAR(255) NOT NULL,
+                    old_value TEXT,
+                    new_value TEXT,
+                    changed_by VARCHAR(255),
                     change_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
             conn.commit()
-            log("INFO: Tabla vpc_changes_history creada")
 
         # Obtener datos existentes
         cursor.execute("SELECT * FROM vpcs")
@@ -137,53 +173,80 @@ def insert_or_update_vpc_data(vpc_data):
             vpc_id = vpc["VpcId"]
             processed += 1
 
-            # Preparar valores para inserción/actualización
-            vpc_values = (
-                vpc["VpcId"], vpc["VpcName"], vpc["CidrBlock"], vpc["State"], vpc["Region"], 
-                vpc["Subnets"], vpc["SecurityGroups"], vpc["NetworkAcls"], vpc["InternetGateways"], 
-                vpc["VpnConnections"], vpc["VpcEndpoints"], vpc["VpcPeerings"], vpc["Tags"], 
-                vpc["AvailabilityZones"], vpc["RouteRules"], vpc["AccountName"], vpc["AccountID"]
+            insert_values = (
+                vpc["VpcId"], vpc["VpcName"], vpc["CidrBlock"], vpc["State"],
+                vpc["Region"], vpc["Subnets"], vpc["SecurityGroups"], vpc["NetworkAcls"],
+                vpc["InternetGateways"], vpc["VpnConnections"], vpc["VpcEndpoints"],
+                vpc["VpcPeerings"], vpc["Tags"], vpc["AvailabilityZones"],
+                vpc["RouteRules"], vpc["AccountName"], vpc["AccountID"]
             )
 
             if vpc_id not in existing_data:
-                cursor.execute(query_insert, vpc_values)
+                cursor.execute(query_insert, insert_values)
                 inserted += 1
             else:
-                # Actualizar solo campos modificados
                 db_row = existing_data[vpc_id]
+                updates = []
+                values = []
+
                 campos = {
-                    "vpc_id": vpc["VpcId"], "vpc_name": vpc["VpcName"], "cidr_block": vpc["CidrBlock"],
-                    "state": vpc["State"], "region": vpc["Region"], "subnets": vpc["Subnets"],
-                    "security_groups": vpc["SecurityGroups"], "network_acls": vpc["NetworkAcls"],
-                    "internet_gateways": vpc["InternetGateways"], "vpn_connections": vpc["VpnConnections"],
-                    "vpc_endpoints": vpc["VpcEndpoints"], "vpc_peerings": vpc["VpcPeerings"],
-                    "tags": vpc["Tags"], "availability_zones": vpc["AvailabilityZones"],
-                    "route_rules": vpc["RouteRules"], "account_name": vpc["AccountName"],
+                    "vpc_id": vpc["VpcId"],
+                    "vpc_name": vpc["VpcName"],
+                    "cidr_block": vpc["CidrBlock"],
+                    "state": vpc["State"],
+                    "region": vpc["Region"],
+                    "subnets": vpc["Subnets"],
+                    "security_groups": vpc["SecurityGroups"],
+                    "network_acls": vpc["NetworkAcls"],
+                    "internet_gateways": vpc["InternetGateways"],
+                    "vpn_connections": vpc["VpnConnections"],
+                    "vpc_endpoints": vpc["VpcEndpoints"],
+                    "vpc_peerings": vpc["VpcPeerings"],
+                    "tags": vpc["Tags"],
+                    "availability_zones": vpc["AvailabilityZones"],
+                    "route_rules": vpc["RouteRules"],
+                    "account_name": vpc["AccountName"],
                     "account_id": vpc["AccountID"]
                 }
 
-                updates, values = [], []
                 for col, new_val in campos.items():
                     old_val = db_row.get(col)
                     if str(old_val) != str(new_val):
                         updates.append(f"{col} = %s")
                         values.append(new_val)
-                        changed_by = get_vpc_changed_by(vpc_id=vpc_id, update_date=datetime.now())
-                        cursor.execute(query_change_history, (vpc_id, col, str(old_val), str(new_val), changed_by))
+                        changed_by = get_vpc_changed_by(
+                            vpc_id=vpc_id,
+                            update_date=datetime.now()
+                        )
+                        
+                        cursor.execute(
+                            query_change_history,
+                            (vpc_id, col, str(old_val), str(new_val), changed_by)
+                        )
+
+                updates.append("last_updated = CURRENT_TIMESTAMP")
 
                 if updates:
-                    updates.append("last_updated = CURRENT_TIMESTAMP")
                     update_query = f"UPDATE vpcs SET {', '.join(updates)} WHERE vpc_id = %s"
                     values.append(vpc_id)
                     cursor.execute(update_query, tuple(values))
                     updated += 1
 
         conn.commit()
-        return {"processed": processed, "inserted": inserted, "updated": updated}
+        return {
+            "processed": processed,
+            "inserted": inserted,
+            "updated": updated
+        }
 
     except Exception as e:
         conn.rollback()
-        log(f"ERROR: Operación BD para VPC: {str(e)}")
-        return {"error": str(e), "processed": processed, "inserted": inserted, "updated": updated}
+        print(f"Database operation failed: {str(e)}")
+        return {
+            "error": str(e),
+            "processed": processed,
+            "inserted": inserted,
+            "updated": updated
+        }
     finally:
         conn.close()
