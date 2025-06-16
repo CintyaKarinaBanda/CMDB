@@ -1,5 +1,5 @@
 from botocore.exceptions import ClientError
-from services.utils import create_aws_client, get_db_connection, log
+from services.utils import create_aws_client, get_db_connection
 
 def get_subnets_details(region, credentials, account_id, account_name):
     ec2 = create_aws_client("ec2", region, credentials)
@@ -73,11 +73,11 @@ def get_subnets_details(region, credentials, account_id, account_name):
             })
 
         if subnet_info:
-            log(f"INFO: Subnets en {region}: {len(subnet_info)} subredes encontradas")
+            print(f"INFO: Subnets en {region}: {len(subnet_info)} subredes encontradas")
         return subnet_info
 
     except ClientError as e:
-        log(f"ERROR: Obtener subnets en {region} para cuenta {account_id}: {str(e)}")
+        print(f"ERROR: Obtener subnets en {region} para cuenta {account_id}: {str(e)}")
         return []
 
 def insert_or_update_subnet_data(subnet_data):
@@ -127,7 +127,7 @@ def insert_or_update_subnet_data(subnet_data):
         return {"processed": processed, "inserted": processed, "updated": 0}
     except Exception as e:
         conn.rollback()
-        log(f"ERROR: Operación BD para subnets: {str(e)}")
+        print(f"ERROR: Operación BD para subnets: {str(e)}")
         return {"error": str(e), "processed": 0, "inserted": 0, "updated": 0}
     finally:
         conn.close()

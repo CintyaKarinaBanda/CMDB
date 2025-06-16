@@ -7,6 +7,10 @@ from datetime import datetime
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from config import DB_USER, DB_PASSWORD, DB_HOST, DB_NAME
 
+def log(message):
+    """Función simple de logging."""
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {message}")
+
 def create_aws_client(service, region, credentials):
     """Crea un cliente de AWS para el servicio especificado."""
     if not credentials or "error" in credentials:

@@ -1,5 +1,5 @@
 from botocore.exceptions import ClientError
-from services.utils import create_aws_client, get_db_connection, log, execute_db_query
+from services.utils import create_aws_client, get_db_connection, execute_db_query
 
 def get_redshift_clusters(region, credentials, account_id, account_name):
     """Obtiene clusters de Redshift de una región."""
@@ -31,10 +31,10 @@ def get_redshift_clusters(region, credentials, account_id, account_name):
                 })
         
         if clusters_info:
-            log(f"INFO: Redshift en {region}: {len(clusters_info)} clusters encontrados")
+            print(f"INFO: Redshift en {region}: {len(clusters_info)} clusters encontrados")
         return clusters_info
     except ClientError as e:
-        log(f"ERROR: Obtener clusters Redshift en {region} para cuenta {account_id}: {str(e)}")
+        print(f"ERROR: Obtener clusters Redshift en {region} para cuenta {account_id}: {str(e)}")
         return []
 
 def insert_or_update_redshift_data(redshift_data):
