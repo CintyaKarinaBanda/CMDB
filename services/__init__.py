@@ -3,4 +3,4 @@ from services.cloudtrail_functions import get_ec2_cloudtrail_events, get_rds_clo
 from services.rds_functions import get_rds_instances, insert_or_update_rds_data
 from services.redshift_functions import get_redshift_clusters, insert_or_update_redshift_data
 from services.vpc_functions import get_vpc_details, insert_or_update_vpc_data
-from services.subnets_functions import get_subnets_details, insert_or_update_subnet_data
+from services.subnets_functions import get_subnets_details, insert_or_update_subnet_data 
