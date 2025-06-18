@@ -23,6 +23,13 @@ IMPORTANT_VPC_EVENTS = {
     "DetachInternetGateway", "CreateNatGateway", "DeleteNatGateway"
 }
 
+IMPORTANT_SUBNET_EVENTS = {
+    "CreateSubnet", "DeleteSubnet", "ModifySubnetAttribute", "CreateNetworkAcl", 
+    "DeleteNetworkAcl", "CreateNetworkAclEntry", "DeleteNetworkAclEntry", 
+    "ReplaceNetworkAclAssociation", "CreateRoute", "DeleteRoute", "CreateRouteTable", 
+    "DeleteRouteTable", "AssociateRouteTable", "DisassociateRouteTable"
+}
+
 def extract_resource_id(event, resource_type):
     """Extrae el ID del recurso del evento según el tipo."""
     req = event.get("requestParameters", {})
@@ -75,13 +82,6 @@ def extract_resource_id(event, resource_type):
         if "vpc" in res and "vpcId" in res["vpc"]:
             return res["vpc"]["vpcId"]
         
-        # Para eventos de subnet
-        if "subnetId" in req:
-            return req["subnetId"]
-        
-        if "subnet" in res and "subnetId" in res["subnet"]:
-            return res["subnet"]["subnetId"]
-        
         # Para eventos de internet gateway
         if "internetGatewayId" in req:
             return req["internetGatewayId"]
@@ -95,6 +95,36 @@ def extract_resource_id(event, resource_type):
         
         if "natGateway" in res and "natGatewayId" in res["natGateway"]:
             return res["natGateway"]["natGatewayId"]
+    
+    # Para recursos Subnet
+    elif resource_type == "SUBNET":
+        # Para eventos de subnet
+        if "subnetId" in req:
+            return req["subnetId"]
+        
+        if "subnet" in res and "subnetId" in res["subnet"]:
+            return res["subnet"]["subnetId"]
+        
+        # Para eventos de ACL
+        if "networkAclId" in req:
+            return req["networkAclId"]
+        
+        if "networkAcl" in res and "networkAclId" in res["networkAcl"]:
+            return res["networkAcl"]["networkAclId"]
+        
+        # Para eventos de route table
+        if "routeTableId" in req:
+            return req["routeTableId"]
+        
+        if "routeTable" in res and "routeTableId" in res["routeTable"]:
+            return res["routeTable"]["routeTableId"]
+        
+        # Para eventos de asociación de route table
+        if "associationId" in req:
+            return req["associationId"]
+        
+        if "associationId" in res:
+            return res["associationId"]
     
     return "unknown"
 
@@ -155,15 +185,6 @@ def extract_changes(event, resource_type):
                 if key not in ["vpcId", "attribute"]:
                     changes["details"][key] = value
         
-        elif event_name == "CreateSubnet":
-            changes["details"].update({
-                "vpcId": req.get("vpcId"),
-                "cidrBlock": req.get("cidrBlock"),
-                "availabilityZone": req.get("availabilityZone")
-            })
-            if "subnet" in res:
-                changes["details"]["subnetId"] = res["subnet"].get("subnetId")
-        
         elif event_name == "CreateInternetGateway":
             if "internetGateway" in res:
                 changes["details"]["internetGatewayId"] = res["internetGateway"].get("internetGatewayId")
@@ -182,6 +203,64 @@ def extract_changes(event, resource_type):
             if "natGateway" in res:
                 changes["details"]["natGatewayId"] = res["natGateway"].get("natGatewayId")
     
+    # Para recursos Subnet
+    elif resource_type == "SUBNET":
+        if event_name == "CreateSubnet":
+            changes["details"].update({
+                "vpcId": req.get("vpcId"),
+                "cidrBlock": req.get("cidrBlock"),
+                "availabilityZone": req.get("availabilityZone")
+            })
+            if "subnet" in res:
+                changes["details"]["subnetId"] = res["subnet"].get("subnetId")
+        
+        elif event_name == "ModifySubnetAttribute":
+            for key, value in req.items():
+                if key not in ["subnetId", "attribute"]:
+                    changes["details"][key] = value
+        
+        elif event_name == "CreateNetworkAcl":
+            changes["details"].update({
+                "vpcId": req.get("vpcId")
+            })
+            if "networkAcl" in res:
+                changes["details"]["networkAclId"] = res["networkAcl"].get("networkAclId")
+        
+        elif event_name in ["CreateNetworkAclEntry", "DeleteNetworkAclEntry"]:
+            changes["details"].update({
+                "networkAclId": req.get("networkAclId"),
+                "ruleNumber": req.get("ruleNumber"),
+                "protocol": req.get("protocol"),
+                "ruleAction": req.get("ruleAction")
+            })
+        
+        elif event_name == "ReplaceNetworkAclAssociation":
+            changes["details"].update({
+                "associationId": req.get("associationId"),
+                "networkAclId": req.get("networkAclId")
+            })
+        
+        elif event_name in ["CreateRouteTable", "DeleteRouteTable"]:
+            changes["details"].update({
+                "vpcId": req.get("vpcId")
+            })
+            if "routeTable" in res:
+                changes["details"]["routeTableId"] = res["routeTable"].get("routeTableId")
+        
+        elif event_name in ["AssociateRouteTable", "DisassociateRouteTable"]:
+            changes["details"].update({
+                "routeTableId": req.get("routeTableId"),
+                "subnetId": req.get("subnetId")
+            })
+            if "associationId" in res:
+                changes["details"]["associationId"] = res["associationId"]
+        
+        elif event_name in ["CreateRoute", "DeleteRoute"]:
+            changes["details"].update({
+                "routeTableId": req.get("routeTableId"),
+                "destinationCidrBlock": req.get("destinationCidrBlock")
+            })
+    
     return changes
 
 def get_ec2_cloudtrail_events(region, credentials):
@@ -195,6 +274,10 @@ def get_rds_cloudtrail_events(region, credentials):
 def get_vpc_cloudtrail_events(region, credentials):
     """Obtiene eventos de CloudTrail relacionados con VPC."""
     return get_cloudtrail_events(region, credentials, "ec2.amazonaws.com", IMPORTANT_VPC_EVENTS, "VPC")
+
+def get_subnet_cloudtrail_events(region, credentials):
+    """Obtiene eventos de CloudTrail relacionados con Subnets."""
+    return get_cloudtrail_events(region, credentials, "ec2.amazonaws.com", IMPORTANT_SUBNET_EVENTS, "SUBNET")
 
 def get_cloudtrail_events(region, credentials, event_source, important_events, resource_type):
     """Obtiene eventos de CloudTrail según el tipo de recurso."""

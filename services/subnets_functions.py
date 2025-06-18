@@ -1,5 +1,30 @@
 from botocore.exceptions import ClientError
+from datetime import datetime
 from services.utils import create_aws_client, get_db_connection
+
+def get_subnet_changed_by(subnet_id, update_date):
+    """Busca el usuario que realizó el cambio más cercano a la fecha de actualización"""
+    conn = get_db_connection()
+    if not conn:
+        return "unknown"
+    
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT user_name FROM cloudtrail_events
+                WHERE resource_type = 'EC2' AND resource_name = %s 
+                AND ABS(EXTRACT(EPOCH FROM (event_time - %s))) < 86400
+                ORDER BY ABS(EXTRACT(EPOCH FROM (event_time - %s))) ASC LIMIT 1
+            """, (subnet_id, update_date, update_date))
+            
+            if result := cursor.fetchone():
+                return result[0]
+            return "unknown"
+    except Exception as e:
+        print(f"[ERROR] changed_by: {subnet_id} - {str(e)}")
+        return "unknown"
+    finally:
+        conn.close()
 
 def get_subnets_details(region, credentials, account_id, account_name):
     ec2 = create_aws_client("ec2", region, credentials)
@@ -86,48 +111,107 @@ def insert_or_update_subnet_data(subnet_data):
 
     conn = get_db_connection()
     if not conn:
-        return {"error": "Database connection failed", "processed": 0, "inserted": 0, "updated": 0}
+        return {"error": "DB connection failed", "processed": 0, "inserted": 0, "updated": 0}
+
+    query_insert = """
+        INSERT INTO subnets (
+            subnetid, vpcid, vpcname, cidrblock, availabilityzone, state,
+            securitygroups, acls, internetgateways, vpnconnections, vpceendpoints,
+            vpcpeerings, routetables, subnetname, accountid, accountname, region, last_updated
+        ) VALUES (
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
+        )
+    """
+
+    query_change_history = """
+        INSERT INTO subnet_changes_history (subnet_id, field_name, old_value, new_value, changed_by)
+        VALUES (%s, %s, %s, %s, %s)
+    """
+
+    inserted = 0
+    updated = 0
+    processed = 0
 
     try:
-        # Usar una sola consulta para insertar/actualizar
-        upsert_query = """
-            INSERT INTO subnets (
-                subnetid, vpcid, vpcname, cidrblock, availabilityzone, state,
-                securitygroups, acls, internetgateways, vpnconnections, vpceendpoints,
-                vpcpeerings, routetables, subnetname, accountid, accountname, region, last_updated
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-            ON CONFLICT (subnetid) DO UPDATE SET
-                vpcid = EXCLUDED.vpcid, vpcname = EXCLUDED.vpcname, cidrblock = EXCLUDED.cidrblock,
-                availabilityzone = EXCLUDED.availabilityzone, state = EXCLUDED.state,
-                securitygroups = EXCLUDED.securitygroups, acls = EXCLUDED.acls,
-                internetgateways = EXCLUDED.internetgateways, vpnconnections = EXCLUDED.vpnconnections,
-                vpceendpoints = EXCLUDED.vpceendpoints, vpcpeerings = EXCLUDED.vpcpeerings,
-                routetables = EXCLUDED.routetables, subnetname = EXCLUDED.subnetname,
-                accountid = EXCLUDED.accountid, accountname = EXCLUDED.accountname,
-                region = EXCLUDED.region, last_updated = CURRENT_TIMESTAMP
-            RETURNING subnetid;
-        """
-
         cursor = conn.cursor()
-        
-        # Preparar datos para inserción
-        prepared_data = [(
-            item["SubnetId"], item["VpcId"], item["VpcName"], item["CidrBlock"],
-            item["AvailabilityZone"], item["State"], item["SecurityGroups"],
-            item["ACLs"], item["InternetGateways"], item["VPNConnections"],
-            item["VPCEndpoints"], item["VPCPeerings"], item["RouteTables"],
-            item["SubnetName"], item["AccountID"], item["AccountName"], item["Region"]
-        ) for item in subnet_data]
-        
-        cursor.executemany(upsert_query, prepared_data)
-        results = cursor.fetchall()
-        conn.commit()
 
-        processed = len(results)
-        return {"processed": processed, "inserted": processed, "updated": 0}
+        cursor.execute("SELECT * FROM subnets")
+        columns = [desc[0].lower() for desc in cursor.description]
+        existing_data = {row[columns.index("subnetid")]: dict(zip(columns, row)) for row in cursor.fetchall()}
+
+        for subnet in subnet_data:
+            subnet_id = subnet["SubnetId"]
+            processed += 1
+
+            insert_values = (
+                subnet["SubnetId"], subnet["VpcId"], subnet["VpcName"], subnet["CidrBlock"],
+                subnet["AvailabilityZone"], subnet["State"], subnet["SecurityGroups"],
+                subnet["ACLs"], subnet["InternetGateways"], subnet["VPNConnections"],
+                subnet["VPCEndpoints"], subnet["VPCPeerings"], subnet["RouteTables"],
+                subnet["SubnetName"], subnet["AccountID"], subnet["AccountName"], subnet["Region"]
+            )
+
+            if subnet_id not in existing_data:
+                cursor.execute(query_insert, insert_values)
+                inserted += 1
+            else:
+                db_row = existing_data[subnet_id]
+                updates = []
+                values = []
+
+                campos = {
+                    "subnetid": subnet["SubnetId"],
+                    "vpcid": subnet["VpcId"],
+                    "vpcname": subnet["VpcName"],
+                    "cidrblock": subnet["CidrBlock"],
+                    "availabilityzone": subnet["AvailabilityZone"],
+                    "state": subnet["State"],
+                    "securitygroups": subnet["SecurityGroups"],
+                    "acls": subnet["ACLs"],
+                    "internetgateways": subnet["InternetGateways"],
+                    "vpnconnections": subnet["VPNConnections"],
+                    "vpceendpoints": subnet["VPCEndpoints"],
+                    "vpcpeerings": subnet["VPCPeerings"],
+                    "routetables": subnet["RouteTables"],
+                    "subnetname": subnet["SubnetName"],
+                    "accountid": subnet["AccountID"],
+                    "accountname": subnet["AccountName"],
+                    "region": subnet["Region"]
+                }
+
+                for col, new_val in campos.items():
+                    old_val = db_row.get(col)
+                    if str(old_val) != str(new_val):
+                        updates.append(f"{col} = %s")
+                        values.append(new_val)
+                        changed_by = get_subnet_changed_by(
+                            subnet_id=subnet_id,
+                            update_date=datetime.now()
+                        )
+                        
+                        cursor.execute(
+                            query_change_history,
+                            (subnet_id, col, str(old_val), str(new_val), changed_by)
+                        )
+
+                updates.append("last_updated = CURRENT_TIMESTAMP")
+
+                if updates:
+                    update_query = f"UPDATE subnets SET {', '.join(updates)} WHERE subnetid = %s"
+                    values.append(subnet_id)
+                    cursor.execute(update_query, tuple(values))
+                    updated += 1
+
+        conn.commit()
+        return {
+            "processed": processed,
+            "inserted": inserted,
+            "updated": updated
+        }
+
     except Exception as e:
         conn.rollback()
-        print(f"ERROR: Operación BD para subnets: {str(e)}")
+        print(f"[ERROR] DB: subnet_data - {str(e)}")
         return {"error": str(e), "processed": 0, "inserted": 0, "updated": 0}
     finally:
         conn.close()
