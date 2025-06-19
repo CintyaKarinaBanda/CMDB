@@ -30,6 +30,12 @@ IMPORTANT_SUBNET_EVENTS = {
     "DeleteRouteTable", "AssociateRouteTable", "DisassociateRouteTable"
 }
 
+IMPORTANT_REDSHIFT_EVENTS = {
+    "CreateCluster", "DeleteCluster", "ModifyCluster", "RebootCluster",
+    "ResizeCluster", "PauseCluster", "ResumeCluster", "RestoreFromClusterSnapshot",
+    "CreateClusterSnapshot", "DeleteClusterSnapshot", "CreateTags", "DeleteTags"
+}
+
 def extract_resource_id(event, resource_type):
     """Extrae el ID del recurso del evento según el tipo."""
     req = event.get("requestParameters", {})
@@ -125,6 +131,30 @@ def extract_resource_id(event, resource_type):
         
         if "associationId" in res:
             return res["associationId"]
+    
+    # Para recursos Redshift
+    elif resource_type == "REDSHIFT":
+        # Para eventos de cluster
+        if "clusterIdentifier" in req:
+            return req["clusterIdentifier"]
+        
+        if "cluster" in res and "clusterIdentifier" in res["cluster"]:
+            return res["cluster"]["clusterIdentifier"]
+        
+        # Para eventos de snapshot
+        if "snapshotIdentifier" in req:
+            return req["snapshotIdentifier"]
+        
+        if "snapshot" in res and "snapshotIdentifier" in res["snapshot"]:
+            return res["snapshot"]["snapshotIdentifier"]
+        
+        # Para eventos de tags
+        if event_name in ["CreateTags", "DeleteTags"]:
+            resource_arn = req.get("resourceName")
+            if resource_arn and "redshift:cluster:" in resource_arn:
+                parts = resource_arn.split(":")
+                if len(parts) > 6:
+                    return parts[6]
     
     return "unknown"
 
@@ -261,6 +291,49 @@ def extract_changes(event, resource_type):
                 "destinationCidrBlock": req.get("destinationCidrBlock")
             })
     
+    # Para recursos Redshift
+    elif resource_type == "REDSHIFT":
+        if event_name == "CreateCluster":
+            changes["details"].update({
+                "clusterIdentifier": req.get("clusterIdentifier"),
+                "nodeType": req.get("nodeType"),
+                "numberOfNodes": req.get("numberOfNodes", 1),
+                "databaseName": req.get("databaseName"),
+                "clusterSubnetGroupName": req.get("clusterSubnetGroupName"),
+                "availabilityZone": req.get("availabilityZone"),
+                "clusterVersion": req.get("clusterVersion")
+            })
+            if "cluster" in res:
+                changes["details"]["clusterId"] = res["cluster"].get("clusterIdentifier")
+        
+        elif event_name == "ModifyCluster":
+            for key in ["nodeType", "numberOfNodes", "clusterType", "clusterVersion", "allowVersionUpgrade"]:
+                if key in req:
+                    changes["details"][key] = req[key]
+        
+        elif event_name == "ResizeCluster":
+            changes["details"].update({
+                "clusterIdentifier": req.get("clusterIdentifier"),
+                "clusterType": req.get("clusterType"),
+                "nodeType": req.get("nodeType"),
+                "numberOfNodes": req.get("numberOfNodes")
+            })
+        
+        elif event_name in ["PauseCluster", "ResumeCluster", "RebootCluster"]:
+            changes["details"]["action"] = event_name.replace("Cluster", "")
+            changes["details"]["clusterIdentifier"] = req.get("clusterIdentifier")
+        
+        elif event_name == "CreateClusterSnapshot":
+            changes["details"].update({
+                "clusterIdentifier": req.get("clusterIdentifier"),
+                "snapshotIdentifier": req.get("snapshotIdentifier")
+            })
+        
+        elif event_name in ["CreateTags", "DeleteTags"]:
+            if "tags" in req:
+                changes["details"]["tags"] = req["tags"]
+            changes["details"]["resourceName"] = req.get("resourceName")
+    
     return changes
 
 def get_ec2_cloudtrail_events(region, credentials):
@@ -278,6 +351,10 @@ def get_vpc_cloudtrail_events(region, credentials):
 def get_subnet_cloudtrail_events(region, credentials):
     """Obtiene eventos de CloudTrail relacionados con Subnets."""
     return get_cloudtrail_events(region, credentials, "ec2.amazonaws.com", IMPORTANT_SUBNET_EVENTS, "SUBNET")
+
+def get_redshift_cloudtrail_events(region, credentials):
+    """Obtiene eventos de CloudTrail relacionados con Redshift."""
+    return get_cloudtrail_events(region, credentials, "redshift.amazonaws.com", IMPORTANT_REDSHIFT_EVENTS, "REDSHIFT")
 
 def get_cloudtrail_events(region, credentials, event_source, important_events, resource_type):
     """Obtiene eventos de CloudTrail según el tipo de recurso."""
