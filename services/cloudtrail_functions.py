@@ -234,7 +234,7 @@ def get_all_cloudtrail_events(region, credentials):
         return {"error": str(e), "events": []}
 
 def insert_or_update_cloudtrail_events(events):
-    """Inserta eventos de CloudTrail en la base de datos."""
+    """Inserta eventos de CloudTrail en la base de datos usando inserción por lotes."""
     if not events:
         return {"inserted": 0, "updated": 0}
     
@@ -274,34 +274,81 @@ def insert_or_update_cloudtrail_events(events):
             """)
             conn.commit()
         
-        # Insertar eventos
-        for event in events:
-            try:
-                cursor.execute(
-                    """
+        # Insertar eventos en lotes para mejorar rendimiento
+        batch_size = 100
+        for i in range(0, len(events), batch_size):
+            batch = events[i:i+batch_size]
+            
+            # Preparar valores para inserción por lotes
+            values_list = []
+            args_list = []
+            
+            for event in batch:
+                try:
+                    # Validar datos antes de insertar
+                    event_id = event.get("event_id")
+                    if not event_id:
+                        continue
+                        
+                    values_list.append("(%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())")
+                    args_list.extend([
+                        event_id,
+                        event.get("event_time"),
+                        event.get("event_name"),
+                        event.get("event_source", "unknown"),
+                        event.get("user_name", "unknown"),
+                        event.get("resource_name", "unknown"),
+                        event.get("resource_type", "EC2"),
+                        event.get("region", "unknown"),
+                        json.dumps(event.get("changes", {}))
+                    ])
+                except Exception as e:
+                    print(f"[ERROR] Preparando evento: {str(e)}")
+            
+            if values_list:
+                try:
+                    # Ejecutar inserción por lotes
+                    sql = f"""
                     INSERT INTO cloudtrail_events 
                     (event_id, event_time, event_name, event_source, user_name, resource_name, 
                      resource_type, region, changes, created_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                    VALUES {", ".join(values_list)}
                     ON CONFLICT (event_id) DO NOTHING
-                    """,
-                    (
-                        event["event_id"],
-                        event["event_time"],
-                        event["event_name"],
-                        event["event_source"],
-                        event["user_name"],
-                        event["resource_name"],
-                        event.get("resource_type", "EC2"), 
-                        event["region"],
-                        json.dumps(event["changes"])
-                    )
-                )
-                inserted += 1
-            except Exception as e:
-                print(f"[ERROR] DB: evento_id={event.get('event_id')} - {str(e)}")
+                    """
+                    cursor.execute(sql, args_list)
+                    inserted += len(values_list)
+                except Exception as e:
+                    print(f"[ERROR] Inserción por lotes: {str(e)}")
+                    # Si falla el lote, intentar insertar uno por uno
+                    for j, event in enumerate(batch):
+                        try:
+                            cursor.execute(
+                                """
+                                INSERT INTO cloudtrail_events 
+                                (event_id, event_time, event_name, event_source, user_name, resource_name, 
+                                resource_type, region, changes, created_at)
+                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                                ON CONFLICT (event_id) DO NOTHING
+                                """,
+                                (
+                                    event.get("event_id"),
+                                    event.get("event_time"),
+                                    event.get("event_name"),
+                                    event.get("event_source", "unknown"),
+                                    event.get("user_name", "unknown"),
+                                    event.get("resource_name", "unknown"),
+                                    event.get("resource_type", "EC2"),
+                                    event.get("region", "unknown"),
+                                    json.dumps(event.get("changes", {}))
+                                )
+                            )
+                            inserted += 1
+                        except Exception as e:
+                            print(f"[ERROR] DB: evento_id={event.get('event_id')} - {str(e)}")
+            
+            # Commit después de cada lote para evitar transacciones largas
+            conn.commit()
         
-        conn.commit()
         return {"inserted": inserted, "updated": 0}
         
     except Exception as e:
