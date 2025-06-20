@@ -12,9 +12,7 @@ from services import (
     get_redshift_clusters, insert_or_update_redshift_data,
     get_vpc_details, insert_or_update_vpc_data,
     get_subnets_details, insert_or_update_subnet_data,
-    get_ec2_cloudtrail_events, insert_or_update_cloudtrail_events,
-    get_rds_cloudtrail_events, get_vpc_cloudtrail_events,
-    get_subnet_cloudtrail_events, get_redshift_cloudtrail_events
+    get_all_cloudtrail_events, insert_or_update_cloudtrail_events
 )
 
 def assume_role(role_arn):
@@ -44,11 +42,7 @@ def process_account_region(account_id, role_name, account_name, region, services
         "redshift": lambda: get_redshift_clusters(region, creds, account_id, account_name),
         "vpc": lambda: get_vpc_details(region, creds, account_id, account_name),
         "subnets": lambda: get_subnets_details(region, creds, account_id, account_name),
-        "ec2_cloudtrail": lambda: get_ec2_cloudtrail_events(region, creds).get("events", []),
-        "rds_cloudtrail": lambda: get_rds_cloudtrail_events(region, creds).get("events", []),
-        "vpc_cloudtrail": lambda: get_vpc_cloudtrail_events(region, creds).get("events", []),
-        "subnets_cloudtrail": lambda: get_subnet_cloudtrail_events(region, creds).get("events", []),
-        "redshift_cloudtrail": lambda: get_redshift_cloudtrail_events(region, creds).get("events", [])
+        "cloudtrail_events": lambda: get_all_cloudtrail_events(region, creds).get("events", [])
     }
 
     result = {"account_id": account_id, "region": region, "credentials": creds}
@@ -103,11 +97,7 @@ def main(services):
         "redshift": insert_or_update_redshift_data,
         "vpc": insert_or_update_vpc_data,
         "subnets": insert_or_update_subnet_data,
-        "ec2_cloudtrail": insert_or_update_cloudtrail_events,
-        "rds_cloudtrail": insert_or_update_cloudtrail_events,
-        "vpc_cloudtrail": insert_or_update_cloudtrail_events,
-        "subnets_cloudtrail": insert_or_update_cloudtrail_events,
-        "redshift_cloudtrail": insert_or_update_cloudtrail_events
+        "cloudtrail_events": insert_or_update_cloudtrail_events
     }
 
     print("\n=== Insertando datos en la base de datos ===")
@@ -140,7 +130,7 @@ def main(services):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Recolecta información de recursos AWS')
-    parser.add_argument('--services', nargs='+', default=["ec2", "ec2_cloudtrail"],
-                      choices=["ec2", "rds", "redshift", "vpc", "subnets", "ec2_cloudtrail", "rds_cloudtrail", "vpc_cloudtrail", "subnets_cloudtrail", "redshift_cloudtrail"],
+    parser.add_argument('--services', nargs='+', default=["ec2", "cloudtrail_events"],
+                      choices=["ec2", "rds", "redshift", "vpc", "subnets", "cloudtrail_events"],
                       help='Servicios a consultar')
     main(parser.parse_args().services)
