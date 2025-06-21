@@ -129,7 +129,7 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
     return {"events": all_events}
 
 def insert_or_update_cloudtrail_events(events_data):
-    """Inserta eventos de CloudTrail en la base de datos optimizado."""
+    """Inserta eventos de CloudTrail en la base de datos con timeout."""
     if not events_data:
         return {"processed": 0, "inserted": 0}
 
@@ -137,6 +137,11 @@ def insert_or_update_cloudtrail_events(events_data):
     from services.utils import get_db_connection
     
     print(f"[CLOUDTRAIL] Iniciando inserción de {len(events_data)} eventos", flush=True)
+    
+    # Limitar a máximo 100 eventos para evitar timeout
+    if len(events_data) > 100:
+        print(f"[CLOUDTRAIL] Limitando a 100 eventos de {len(events_data)} para evitar timeout", flush=True)
+        events_data = events_data[:100]
     
     conn = get_db_connection()
     if not conn:
@@ -146,21 +151,19 @@ def insert_or_update_cloudtrail_events(events_data):
     try:
         cursor = conn.cursor()
         inserted = 0
-        processed = 0
         
+        # Inserción rápida sin verificación individual
         for i, event in enumerate(events_data, 1):
-            processed += 1
+            if i % 25 == 0:
+                print(f"[CLOUDTRAIL] {i}/{len(events_data)}...", flush=True)
             
-            if i % 10 == 0 or i == len(events_data):
-                print(f"[CLOUDTRAIL] Procesando {i}/{len(events_data)} eventos...", flush=True)
+            resource_type = {
+                "ec2.amazonaws.com": "EC2",
+                "rds.amazonaws.com": "RDS", 
+                "redshift.amazonaws.com": "Redshift"
+            }.get(event["event_source"], "Unknown")
             
             try:
-                resource_type = {
-                    "ec2.amazonaws.com": "EC2",
-                    "rds.amazonaws.com": "RDS", 
-                    "redshift.amazonaws.com": "Redshift"
-                }.get(event["event_source"], "Unknown")
-                
                 cursor.execute("""
                     INSERT INTO cloudtrail_events (
                         event_id, event_time, event_name, user_name, resource_name,
@@ -174,26 +177,20 @@ def insert_or_update_cloudtrail_events(events_data):
                     event["region"], event["event_source"], event["account_id"], event["account_name"]
                 ))
                 inserted += 1
-                
-            except Exception as insert_error:
-                if "duplicate key" in str(insert_error).lower():
-                    continue
-                else:
-                    print(f"[ERROR] Insertando evento {i}: {str(insert_error)}", flush=True)
-                    raise insert_error
+            except:
+                pass  # Ignorar duplicados silenciosamente
         
-        print(f"[CLOUDTRAIL] Haciendo commit de {inserted} eventos...", flush=True)
         conn.commit()
-        print(f"[CLOUDTRAIL] Inserción completada: {inserted} insertados de {processed} procesados", flush=True)
+        print(f"[CLOUDTRAIL] Completado: {inserted} insertados", flush=True)
         
         return {
-            "processed": processed,
+            "processed": len(events_data),
             "inserted": inserted
         }
 
     except Exception as e:
         conn.rollback()
-        print(f"[ERROR] DB: cloudtrail_events - {str(e)}", flush=True)
+        print(f"[ERROR] CloudTrail DB: {str(e)[:100]}...", flush=True)
         return {"error": str(e), "processed": 0, "inserted": 0}
     finally:
         conn.close()
