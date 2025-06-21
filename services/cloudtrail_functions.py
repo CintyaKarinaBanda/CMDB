@@ -25,44 +25,54 @@ def extract_resource_id(event_detail):
     """Extrae resource_id siguiendo el patrón de AWS CloudTrail Console."""
     req = event_detail.get("requestParameters", {})
     resp = event_detail.get("responseElements", {})
+    event_name = event_detail.get("eventName", "")
+    
+    # Debug: imprimir algunos casos para verificar
+    if event_name in ["CreateTags", "StopInstances", "StartInstances"]:
+        print(f"[DEBUG] Event: {event_name}, Req keys: {list(req.keys())}, Resp keys: {list(resp.keys())}", flush=True)
     
     # 1. Estructuras de conjuntos (más común)
-    sets_map = {
-        "instancesSet": "instanceId",
-        "resourcesSet": "resourceId", 
-        "volumeSet": "volumeId",
-        "snapshotSet": "snapshotId"
-    }
+    if "instancesSet" in req:
+        items = req["instancesSet"].get("items", [])
+        if items and "instanceId" in items[0]:
+            return items[0]["instanceId"]
     
-    for set_name, id_field in sets_map.items():
-        if set_name in req:
-            items = req[set_name].get("items", [])
-            if items and id_field in items[0]:
-                return items[0][id_field]
+    if "resourcesSet" in req:
+        items = req["resourcesSet"].get("items", [])
+        if items and "resourceId" in items[0]:
+            return items[0]["resourceId"]
     
-    # 2. Campos directos en requestParameters
+    # 2. Campos directos más comunes primero
     direct_fields = [
-        "instanceId", "dBInstanceIdentifier", "vpcId", "subnetId",
-        "clusterIdentifier", "volumeId", "snapshotId", "imageId",
+        "instanceId", "dBInstanceIdentifier", "clusterIdentifier",
+        "vpcId", "subnetId", "volumeId", "snapshotId", "imageId",
         "groupId", "networkInterfaceId", "allocationId", "natGatewayId",
         "routeTableId", "internetGatewayId", "securityGroupId"
     ]
     
     for field in direct_fields:
-        if field in req:
+        if field in req and req[field]:
             return req[field]
     
-    # 3. responseElements para recursos creados (RunInstances, CreateVpc, etc.)
+    # 3. responseElements para recursos creados
     for field in direct_fields:
-        if field in resp:
+        if field in resp and resp[field]:
             return resp[field]
     
-    # 4. Casos especiales anidados
-    if "instances" in resp:
+    # 4. Casos especiales por tipo de evento
+    if event_name == "RunInstances" and "instances" in resp:
         instances = resp["instances"]
         if isinstance(instances, list) and instances:
             return instances[0].get("instanceId", "unknown")
     
+    # 5. Buscar cualquier campo que termine en Id o identifier
+    for key, value in req.items():
+        if (key.lower().endswith('id') or 'identifier' in key.lower()) and isinstance(value, str) and value:
+            return value
+    
+    # Si llegamos aquí, imprimir para debug
+    if event_name in ["CreateTags", "StopInstances", "StartInstances"]:
+        print(f"[DEBUG] No resource_id found for {event_name}: {req}", flush=True)
     return "unknown"
 
 def extract_basic_info(event_detail):
