@@ -21,19 +21,56 @@ IMPORTANT_EVENTS = {
 
 EVENT_SOURCES = ["ec2.amazonaws.com", "rds.amazonaws.com", "redshift.amazonaws.com"]
 
+def extract_resource_id(event_detail):
+    """Extrae resource_id siguiendo el patrón de AWS CloudTrail Console."""
+    req = event_detail.get("requestParameters", {})
+    resp = event_detail.get("responseElements", {})
+    
+    # 1. Estructuras de conjuntos (más común)
+    sets_map = {
+        "instancesSet": "instanceId",
+        "resourcesSet": "resourceId", 
+        "volumeSet": "volumeId",
+        "snapshotSet": "snapshotId"
+    }
+    
+    for set_name, id_field in sets_map.items():
+        if set_name in req:
+            items = req[set_name].get("items", [])
+            if items and id_field in items[0]:
+                return items[0][id_field]
+    
+    # 2. Campos directos en requestParameters
+    direct_fields = [
+        "instanceId", "dBInstanceIdentifier", "vpcId", "subnetId",
+        "clusterIdentifier", "volumeId", "snapshotId", "imageId",
+        "groupId", "networkInterfaceId", "allocationId", "natGatewayId",
+        "routeTableId", "internetGatewayId", "securityGroupId"
+    ]
+    
+    for field in direct_fields:
+        if field in req:
+            return req[field]
+    
+    # 3. responseElements para recursos creados (RunInstances, CreateVpc, etc.)
+    for field in direct_fields:
+        if field in resp:
+            return resp[field]
+    
+    # 4. Casos especiales anidados
+    if "instances" in resp:
+        instances = resp["instances"]
+        if isinstance(instances, list) and instances:
+            return instances[0].get("instanceId", "unknown")
+    
+    return "unknown"
+
 def extract_basic_info(event_detail):
     """Extrae información clave del evento."""
     event_name = event_detail.get("eventName", "unknown")
     user = event_detail.get("userIdentity", {})
     user_name = user.get("userName") or user.get("principalId", "unknown")
-    
-    # Extrae un ID de recurso genérico (mejorable si se quiere precisión por tipo)
-    resource_id = "unknown"
-    req = event_detail.get("requestParameters", {})
-    for key in ["instanceId", "dBInstanceIdentifier", "vpcId", "subnetId", "clusterIdentifier"]:
-        if key in req:
-            resource_id = req[key]
-            break
+    resource_id = extract_resource_id(event_detail)
     
     return {
         "event_name": event_name,
@@ -92,7 +129,7 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
     return {"events": all_events}
 
 def insert_or_update_cloudtrail_events(events_data):
-    """Inserta eventos de CloudTrail en la base de datos."""
+    """Inserta eventos de CloudTrail en la base de datos optimizado."""
     if not events_data:
         return {"processed": 0, "inserted": 0}
 
@@ -102,51 +139,51 @@ def insert_or_update_cloudtrail_events(events_data):
     if not conn:
         return {"error": "DB connection failed", "processed": 0, "inserted": 0}
 
-    inserted = 0
-    processed = 0
-
     try:
         cursor = conn.cursor()
-
-        for event in events_data:
-            processed += 1
-            
-            # Verificar si existe
-            cursor.execute("SELECT 1 FROM cloudtrail_events WHERE event_id = %s LIMIT 1", (event["event_id"],))
-            if cursor.fetchone():
-                continue
-            
+        
+        # 1. Obtener todos los event_ids existentes de una vez
+        event_ids = [e["event_id"] for e in events_data]
+        cursor.execute(
+            "SELECT event_id FROM cloudtrail_events WHERE event_id = ANY(%s)",
+            (event_ids,)
+        )
+        existing_ids = {row[0] for row in cursor.fetchall()}
+        
+        # 2. Filtrar solo eventos nuevos
+        new_events = [e for e in events_data if e["event_id"] not in existing_ids]
+        
+        if not new_events:
+            return {"processed": len(events_data), "inserted": 0}
+        
+        # 3. Inserción batch
+        insert_data = []
+        for event in new_events:
             resource_type = {
                 "ec2.amazonaws.com": "EC2",
                 "rds.amazonaws.com": "RDS", 
                 "redshift.amazonaws.com": "Redshift"
             }.get(event["event_source"], "Unknown")
-
-            cursor.execute("""
-                INSERT INTO cloudtrail_events (
-                    event_id, event_time, event_name, user_name, resource_name,
-                    resource_type, region, event_source, account_id, account_name, last_updated
-                ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
-                )
-            """, (
-                event["event_id"],
-                event["event_time"],
-                event["event_name"],
-                event["user_name"],
-                event["resource_id"],
-                resource_type,
-                event["region"],
-                event["event_source"],
-                event["account_id"],
-                event["account_name"]
+            
+            insert_data.append((
+                event["event_id"], event["event_time"], event["event_name"],
+                event["user_name"], event["resource_id"], resource_type,
+                event["region"], event["event_source"], event["account_id"], event["account_name"]
             ))
-            inserted += 1
-
+        
+        cursor.executemany("""
+            INSERT INTO cloudtrail_events (
+                event_id, event_time, event_name, user_name, resource_name,
+                resource_type, region, event_source, account_id, account_name, last_updated
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
+            )
+        """, insert_data)
+        
         conn.commit()
         return {
-            "processed": processed,
-            "inserted": inserted
+            "processed": len(events_data),
+            "inserted": len(new_events)
         }
 
     except Exception as e:
