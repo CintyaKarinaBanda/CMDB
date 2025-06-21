@@ -91,6 +91,29 @@ def extract_resource_name(event_detail):
     
     return "unknown"
 
+def is_valid_resource(resource_name, event_source):
+    """Verifica si el resource_name es válido según los criterios."""
+    if not resource_name or resource_name == "unknown":
+        return False
+    
+    # Instancias EC2
+    if resource_name.startswith("i-"):
+        return True
+    # VPCs
+    if resource_name.startswith("vpc-"):
+        return True
+    # Subnets
+    if resource_name.startswith("subnet-"):
+        return True
+    # RDS
+    if event_source == "rds.amazonaws.com":
+        return True
+    # Redshift
+    if event_source == "redshift.amazonaws.com":
+        return True
+    
+    return False
+
 def extract_basic_info(event_detail):
     """Extrae información clave del evento."""
     event_name = event_detail.get("eventName", "unknown")
@@ -137,6 +160,11 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
                         continue
                     
                     basic_info = extract_basic_info(detail)
+                    
+                    # Filtrar solo recursos válidos
+                    if not is_valid_resource(basic_info["resource_name"], detail.get("eventSource", source)):
+                        continue
+                    
                     all_events.append({
                         "event_id": event.get("EventId"),
                         "event_time": event.get("EventTime"),
