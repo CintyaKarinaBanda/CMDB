@@ -133,18 +133,27 @@ def insert_or_update_cloudtrail_events(events_data):
     if not events_data:
         return {"processed": 0, "inserted": 0}
 
+    import sys
     from services.utils import get_db_connection
+    
+    print(f"[CLOUDTRAIL] Iniciando inserción de {len(events_data)} eventos", flush=True)
     
     conn = get_db_connection()
     if not conn:
+        print("[ERROR] No se pudo conectar a la BD", flush=True)
         return {"error": "DB connection failed", "processed": 0, "inserted": 0}
 
     try:
         cursor = conn.cursor()
-        
-        # Inserción simple con manejo de duplicados
         inserted = 0
-        for event in events_data:
+        processed = 0
+        
+        for i, event in enumerate(events_data, 1):
+            processed += 1
+            
+            if i % 10 == 0 or i == len(events_data):
+                print(f"[CLOUDTRAIL] Procesando {i}/{len(events_data)} eventos...", flush=True)
+            
             try:
                 resource_type = {
                     "ec2.amazonaws.com": "EC2",
@@ -165,24 +174,26 @@ def insert_or_update_cloudtrail_events(events_data):
                     event["region"], event["event_source"], event["account_id"], event["account_name"]
                 ))
                 inserted += 1
+                
             except Exception as insert_error:
                 if "duplicate key" in str(insert_error).lower():
-                    continue  # Skip duplicados
+                    continue
                 else:
+                    print(f"[ERROR] Insertando evento {i}: {str(insert_error)}", flush=True)
                     raise insert_error
         
+        print(f"[CLOUDTRAIL] Haciendo commit de {inserted} eventos...", flush=True)
         conn.commit()
+        print(f"[CLOUDTRAIL] Inserción completada: {inserted} insertados de {processed} procesados", flush=True)
+        
         return {
-            "processed": len(events_data),
+            "processed": processed,
             "inserted": inserted
         }
 
     except Exception as e:
         conn.rollback()
-        print(f"[ERROR] DB: cloudtrail_events - {str(e)}")
-        print(f"[DEBUG] Eventos a procesar: {len(events_data)}")
-        if events_data:
-            print(f"[DEBUG] Primer evento: {events_data[0]}")
+        print(f"[ERROR] DB: cloudtrail_events - {str(e)}", flush=True)
         return {"error": str(e), "processed": 0, "inserted": 0}
     finally:
         conn.close()
