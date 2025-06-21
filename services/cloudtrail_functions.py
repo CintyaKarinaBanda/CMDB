@@ -114,17 +114,77 @@ def is_valid_resource(resource_name, event_source):
     
     return False
 
+def extract_changes(event_detail):
+    """Extrae información específica de cambios según el tipo de evento."""
+    req = event_detail.get("requestParameters", {})
+    resp = event_detail.get("responseElements", {})
+    event_name = event_detail.get("eventName", "")
+    
+    changes = {}
+    
+    # Tags
+    if event_name in ["CreateTags", "DeleteTags"]:
+        if "resourcesSet" in req:
+            tags = []
+            for item in req["resourcesSet"].get("items", []):
+                if "tagSet" in item:
+                    for tag in item["tagSet"].get("items", []):
+                        tags.append(f"{tag.get('key', '')}={tag.get('value', '')}")
+            if tags:
+                changes["tags"] = ", ".join(tags)
+    
+    # EC2 Instances
+    elif event_name == "RunInstances":
+        changes["instance_type"] = req.get("instanceType")
+        changes["image_id"] = req.get("imageId")
+        changes["subnet_id"] = req.get("subnetId")
+    
+    elif event_name == "ModifyInstanceAttribute":
+        if "attribute" in req:
+            changes["attribute"] = req["attribute"]
+        if "value" in req:
+            changes["new_value"] = str(req["value"])
+    
+    # RDS
+    elif event_name == "CreateDBInstance":
+        changes["db_instance_class"] = req.get("dBInstanceClass")
+        changes["engine"] = req.get("engine")
+        changes["engine_version"] = req.get("engineVersion")
+    
+    elif event_name == "ModifyDBInstance":
+        modify_fields = ["dBInstanceClass", "allocatedStorage", "engineVersion"]
+        for field in modify_fields:
+            if field in req:
+                changes[field.lower()] = req[field]
+    
+    # VPC/Subnet
+    elif event_name == "CreateVpc":
+        changes["cidr_block"] = req.get("cidrBlock")
+    
+    elif event_name == "CreateSubnet":
+        changes["cidr_block"] = req.get("cidrBlock")
+        changes["vpc_id"] = req.get("vpcId")
+    
+    # Redshift
+    elif event_name == "CreateCluster":
+        changes["node_type"] = req.get("nodeType")
+        changes["number_of_nodes"] = req.get("numberOfNodes")
+    
+    return json.dumps(changes) if changes else None
+
 def extract_basic_info(event_detail):
     """Extrae información clave del evento."""
     event_name = event_detail.get("eventName", "unknown")
     user = event_detail.get("userIdentity", {})
     user_name = user.get("userName") or user.get("principalId", "unknown")
     resource_name = extract_resource_name(event_detail)
+    changes = extract_changes(event_detail)
     
     return {
         "event_name": event_name,
         "user_name": user_name,
-        "resource_name": resource_name
+        "resource_name": resource_name,
+        "changes": changes
     }
 
 def get_all_cloudtrail_events(region, credentials, account_id, account_name):
@@ -209,15 +269,16 @@ def insert_or_update_cloudtrail_events(events_data):
             cursor.execute("""
                 INSERT INTO cloudtrail_events (
                     event_id, event_time, event_name, user_name, resource_name,
-                    resource_type, region, event_source, account_id, account_name, last_updated
+                    resource_type, region, event_source, account_id, account_name, changes, last_updated
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
                 )
                 ON CONFLICT (event_id) DO NOTHING
             """, (
                 event["event_id"], event["event_time"], event["event_name"],
                 event["user_name"], event["resource_name"], resource_type,
-                event["region"], event["event_source"], event["account_id"], event["account_name"]
+                event["region"], event["event_source"], event["account_id"], 
+                event["account_name"], event.get("changes")
             ))
             
             if cursor.rowcount > 0:
