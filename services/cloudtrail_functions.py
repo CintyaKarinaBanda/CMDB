@@ -142,53 +142,47 @@ def insert_or_update_cloudtrail_events(events_data):
     try:
         cursor = conn.cursor()
         
-        # 1. Obtener todos los event_ids existentes de una vez
-        event_ids = [e["event_id"] for e in events_data]
-        cursor.execute(
-            "SELECT event_id FROM cloudtrail_events WHERE event_id = ANY(%s)",
-            (event_ids,)
-        )
-        existing_ids = {row[0] for row in cursor.fetchall()}
-        
-        # 2. Filtrar solo eventos nuevos
-        new_events = [e for e in events_data if e["event_id"] not in existing_ids]
-        
-        if not new_events:
-            return {"processed": len(events_data), "inserted": 0}
-        
-        # 3. Inserción batch
-        insert_data = []
-        for event in new_events:
-            resource_type = {
-                "ec2.amazonaws.com": "EC2",
-                "rds.amazonaws.com": "RDS", 
-                "redshift.amazonaws.com": "Redshift"
-            }.get(event["event_source"], "Unknown")
-            
-            insert_data.append((
-                event["event_id"], event["event_time"], event["event_name"],
-                event["user_name"], event["resource_id"], resource_type,
-                event["region"], event["event_source"], event["account_id"], event["account_name"]
-            ))
-        
-        cursor.executemany("""
-            INSERT INTO cloudtrail_events (
-                event_id, event_time, event_name, user_name, resource_name,
-                resource_type, region, event_source, account_id, account_name, last_updated
-            ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
-            )
-        """, insert_data)
+        # Inserción simple con manejo de duplicados
+        inserted = 0
+        for event in events_data:
+            try:
+                resource_type = {
+                    "ec2.amazonaws.com": "EC2",
+                    "rds.amazonaws.com": "RDS", 
+                    "redshift.amazonaws.com": "Redshift"
+                }.get(event["event_source"], "Unknown")
+                
+                cursor.execute("""
+                    INSERT INTO cloudtrail_events (
+                        event_id, event_time, event_name, user_name, resource_name,
+                        resource_type, region, event_source, account_id, account_name, last_updated
+                    ) VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
+                    )
+                """, (
+                    event["event_id"], event["event_time"], event["event_name"],
+                    event["user_name"], event["resource_id"], resource_type,
+                    event["region"], event["event_source"], event["account_id"], event["account_name"]
+                ))
+                inserted += 1
+            except Exception as insert_error:
+                if "duplicate key" in str(insert_error).lower():
+                    continue  # Skip duplicados
+                else:
+                    raise insert_error
         
         conn.commit()
         return {
             "processed": len(events_data),
-            "inserted": len(new_events)
+            "inserted": inserted
         }
 
     except Exception as e:
         conn.rollback()
         print(f"[ERROR] DB: cloudtrail_events - {str(e)}")
+        print(f"[DEBUG] Eventos a procesar: {len(events_data)}")
+        if events_data:
+            print(f"[DEBUG] Primer evento: {events_data[0]}")
         return {"error": str(e), "processed": 0, "inserted": 0}
     finally:
         conn.close()
