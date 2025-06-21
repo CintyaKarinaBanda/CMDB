@@ -139,43 +139,34 @@ def insert_or_update_cloudtrail_events(events_data):
     if not conn:
         return {"error": "DB connection failed", "processed": 0, "inserted": 0}
 
-    query_insert = """
-        INSERT INTO cloudtrail_events (
-            event_id, event_time, event_name, user_name, resource_name,
-            resource_type, region, event_source, account_id, account_name, last_updated
-        ) VALUES (
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
-        )
-    """
-
     inserted = 0
-    processed = 0
+    processed = len(events_data)
 
     try:
         cursor = conn.cursor()
-
-        # Obtener eventos existentes
-        cursor.execute("SELECT event_id FROM cloudtrail_events")
-        existing_events = {row[0] for row in cursor.fetchall()}
-
+        
         for event in events_data:
-            event_id = event["event_id"]
-            processed += 1
+            resource_type = {
+                "ec2.amazonaws.com": "EC2",
+                "rds.amazonaws.com": "RDS", 
+                "redshift.amazonaws.com": "Redshift"
+            }.get(event["event_source"], "Unknown")
 
-            if event_id not in existing_events:
-                resource_type = {
-                    "ec2.amazonaws.com": "EC2",
-                    "rds.amazonaws.com": "RDS", 
-                    "redshift.amazonaws.com": "Redshift"
-                }.get(event["event_source"], "Unknown")
-
-                insert_values = (
-                    event_id, event["event_time"], event["event_name"],
-                    event["user_name"], event["resource_id"], resource_type,
-                    event["region"], event["event_source"], event["account_id"], event["account_name"]
+            cursor.execute("""
+                INSERT INTO cloudtrail_events (
+                    event_id, event_time, event_name, user_name, resource_name,
+                    resource_type, region, event_source, account_id, account_name, last_updated
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
                 )
-                
-                cursor.execute(query_insert, insert_values)
+                ON CONFLICT (event_id) DO NOTHING
+            """, (
+                event["event_id"], event["event_time"], event["event_name"],
+                event["user_name"], event["resource_id"], resource_type,
+                event["region"], event["event_source"], event["account_id"], event["account_name"]
+            ))
+            
+            if cursor.rowcount > 0:
                 inserted += 1
 
         conn.commit()
