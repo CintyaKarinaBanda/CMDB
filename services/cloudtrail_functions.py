@@ -21,58 +21,74 @@ IMPORTANT_EVENTS = {
 
 EVENT_SOURCES = ["ec2.amazonaws.com", "rds.amazonaws.com", "redshift.amazonaws.com"]
 
-def extract_resource_id(event_detail):
-    """Extrae resource_id siguiendo el patrón de AWS CloudTrail Console."""
+def extract_resource_name(event_detail):
+    """Extrae resource_name siguiendo el patrón exacto de AWS CloudTrail Console."""
     req = event_detail.get("requestParameters", {})
     resp = event_detail.get("responseElements", {})
     event_name = event_detail.get("eventName", "")
+    event_source = event_detail.get("eventSource", "")
     
-    # Debug: imprimir algunos casos para verificar
-    if event_name in ["CreateTags", "StopInstances", "StartInstances"]:
-        print(f"[DEBUG] Event: {event_name}, Req keys: {list(req.keys())}, Resp keys: {list(resp.keys())}", flush=True)
-    
-    # 1. Estructuras de conjuntos (más común)
-    if "instancesSet" in req:
-        items = req["instancesSet"].get("items", [])
-        if items and "instanceId" in items[0]:
-            return items[0]["instanceId"]
-    
+    # Prioridad 1: Conjuntos de recursos (resourcesSet, instancesSet)
     if "resourcesSet" in req:
         items = req["resourcesSet"].get("items", [])
         if items and "resourceId" in items[0]:
             return items[0]["resourceId"]
     
-    # 2. Campos directos más comunes primero
-    direct_fields = [
-        "instanceId", "dBInstanceIdentifier", "clusterIdentifier",
-        "vpcId", "subnetId", "volumeId", "snapshotId", "imageId",
-        "groupId", "networkInterfaceId", "allocationId", "natGatewayId",
-        "routeTableId", "internetGatewayId", "securityGroupId"
-    ]
+    if "instancesSet" in req:
+        items = req["instancesSet"].get("items", [])
+        if items and "instanceId" in items[0]:
+            return items[0]["instanceId"]
     
-    for field in direct_fields:
-        if field in req and req[field]:
-            return req[field]
+    # Prioridad 2: Campos específicos por servicio y evento
+    # EC2 Events
+    if event_source == "ec2.amazonaws.com":
+        ec2_fields = ["instanceId", "volumeId", "snapshotId", "imageId", "vpcId", 
+                     "subnetId", "groupId", "networkInterfaceId", "allocationId", 
+                     "natGatewayId", "routeTableId", "internetGatewayId"]
+        for field in ec2_fields:
+            if field in req and req[field]:
+                return req[field]
     
-    # 3. responseElements para recursos creados
-    for field in direct_fields:
+    # RDS Events
+    elif event_source == "rds.amazonaws.com":
+        rds_fields = ["dBInstanceIdentifier", "dBClusterIdentifier", "dBSnapshotIdentifier", 
+                     "dBClusterSnapshotIdentifier", "resourceName"]
+        for field in rds_fields:
+            if field in req and req[field]:
+                return req[field]
+    
+    # Redshift Events
+    elif event_source == "redshift.amazonaws.com":
+        redshift_fields = ["clusterIdentifier", "snapshotIdentifier", "resourceName"]
+        for field in redshift_fields:
+            if field in req and req[field]:
+                return req[field]
+    
+    # Prioridad 3: responseElements para recursos recién creados
+    if event_name == "RunInstances" and "instances" in resp:
+        instances = resp["instances"]
+        if isinstance(instances, list) and instances and "instanceId" in instances[0]:
+            return instances[0]["instanceId"]
+    
+    # Campos comunes en responseElements
+    response_fields = ["instanceId", "dBInstanceIdentifier", "clusterIdentifier", 
+                      "vpcId", "subnetId", "volumeId", "groupId"]
+    for field in response_fields:
         if field in resp and resp[field]:
             return resp[field]
     
-    # 4. Casos especiales por tipo de evento
-    if event_name == "RunInstances" and "instances" in resp:
-        instances = resp["instances"]
-        if isinstance(instances, list) and instances:
-            return instances[0].get("instanceId", "unknown")
+    # Prioridad 4: Búsqueda genérica de identificadores
+    all_params = {**req, **resp}
+    for key, value in all_params.items():
+        if isinstance(value, str) and value and (
+            key.lower().endswith('id') or 
+            'identifier' in key.lower() or 
+            key.lower().endswith('name')
+        ):
+            # Excluir campos que no son resource names
+            if key not in ['requestId', 'eventId', 'eventName', 'userName', 'principalId']:
+                return value
     
-    # 5. Buscar cualquier campo que termine en Id o identifier
-    for key, value in req.items():
-        if (key.lower().endswith('id') or 'identifier' in key.lower()) and isinstance(value, str) and value:
-            return value
-    
-    # Si llegamos aquí, imprimir para debug
-    if event_name in ["CreateTags", "StopInstances", "StartInstances"]:
-        print(f"[DEBUG] No resource_id found for {event_name}: {req}", flush=True)
     return "unknown"
 
 def extract_basic_info(event_detail):
@@ -80,12 +96,12 @@ def extract_basic_info(event_detail):
     event_name = event_detail.get("eventName", "unknown")
     user = event_detail.get("userIdentity", {})
     user_name = user.get("userName") or user.get("principalId", "unknown")
-    resource_id = extract_resource_id(event_detail)
+    resource_name = extract_resource_name(event_detail)
     
     return {
         "event_name": event_name,
         "user_name": user_name,
-        "resource_id": resource_id
+        "resource_name": resource_name
     }
 
 def get_all_cloudtrail_events(region, credentials, account_id, account_name):
@@ -172,7 +188,7 @@ def insert_or_update_cloudtrail_events(events_data):
                 ON CONFLICT (event_id) DO NOTHING
             """, (
                 event["event_id"], event["event_time"], event["event_name"],
-                event["user_name"], event["resource_id"], resource_type,
+                event["user_name"], event["resource_name"], resource_type,
                 event["region"], event["event_source"], event["account_id"], event["account_name"]
             ))
             
