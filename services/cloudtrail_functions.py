@@ -100,48 +100,44 @@ def insert_or_update_cloudtrail_events(events_data):
     if not conn:
         return {"error": "DB connection failed", "processed": 0, "inserted": 0}
 
-    query_insert = """
-        INSERT INTO cloudtrail_events (
-            event_id, event_time, event_name, user_name, resource_name,
-            resource_type, region, event_source, last_updated
-        ) VALUES (
-            %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
-        )
-    """
-
     inserted = 0
     processed = 0
 
     try:
         cursor = conn.cursor()
-        
-        cursor.execute("SELECT event_id FROM cloudtrail_events")
-        existing_events = {row[0] for row in cursor.fetchall()}
 
         for event in events_data:
-            event_id = event["event_id"]
             processed += 1
+            
+            # Verificar si existe
+            cursor.execute("SELECT 1 FROM cloudtrail_events WHERE event_id = %s LIMIT 1", (event["event_id"],))
+            if cursor.fetchone():
+                continue
+            
+            resource_type = {
+                "ec2.amazonaws.com": "EC2",
+                "rds.amazonaws.com": "RDS", 
+                "redshift.amazonaws.com": "Redshift"
+            }.get(event["event_source"], "Unknown")
 
-            if event_id not in existing_events:
-                resource_type = {
-                    "ec2.amazonaws.com": "EC2",
-                    "rds.amazonaws.com": "RDS", 
-                    "redshift.amazonaws.com": "Redshift"
-                }.get(event["event_source"], "Unknown")
-
-                insert_values = (
-                    event_id,
-                    event["event_time"],
-                    event["event_name"],
-                    event["user_name"],
-                    event["resource_id"],
-                    resource_type,
-                    event["region"],
-                    event["event_source"]
+            cursor.execute("""
+                INSERT INTO cloudtrail_events (
+                    event_id, event_time, event_name, user_name, resource_name,
+                    resource_type, region, event_source, last_updated
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
                 )
-                
-                cursor.execute(query_insert, insert_values)
-                inserted += 1
+            """, (
+                event["event_id"],
+                event["event_time"],
+                event["event_name"],
+                event["user_name"],
+                event["resource_id"],
+                resource_type,
+                event["region"],
+                event["event_source"]
+            ))
+            inserted += 1
 
         conn.commit()
         return {
