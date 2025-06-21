@@ -42,7 +42,7 @@ def process_account_region(account_id, role_name, account_name, region, services
         "redshift": lambda: get_redshift_clusters(region, creds, account_id, account_name),
         "vpc": lambda: get_vpc_details(region, creds, account_id, account_name),
         "subnets": lambda: get_subnets_details(region, creds, account_id, account_name),
-        "cloudtrail_events": lambda: get_all_cloudtrail_events(region, creds).get("events", [])
+        "cloudtrail": lambda: get_all_cloudtrail_events(region, creds).get("events", [])
     }
 
     result = {"account_id": account_id, "region": region, "credentials": creds}
@@ -51,7 +51,7 @@ def process_account_region(account_id, role_name, account_name, region, services
             print(f"[{account_id}:{region}] Tiempo límite excedido")
             break
         try:
-            key = f"{service}_data" if service != "cloudtrail_events" else service
+            key = f"{service}_data"
             result[key] = service_funcs.get(service, lambda: [])()
         except Exception as e:
             print(f"[{account_id}:{region}] Error en {service}: {str(e)}")
@@ -97,7 +97,7 @@ def main(services):
         "redshift": insert_or_update_redshift_data,
         "vpc": insert_or_update_vpc_data,
         "subnets": insert_or_update_subnet_data,
-        "cloudtrail_events": insert_or_update_cloudtrail_events
+        "cloudtrail": insert_or_update_cloudtrail_events
     }
 
     print("\n=== Insertando datos en la base de datos ===")
@@ -116,7 +116,7 @@ def main(services):
             res = insert_funcs[s](data)
             messages.append(
                 f"{s.upper()} ({reg}): {len(data)} items "
-                f"({res.get('inserted', 0)} insertados, {res.get('updated', 0)} actualizados)"
+                f"({res.get('inserted', 0)} insertados{', ' + str(res.get('updated', 0)) + ' actualizados' if res.get('updated', 0) else ''})"
             )
 
     print("\n=== Resultados ===")
@@ -130,7 +130,7 @@ def main(services):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Recolecta información de recursos AWS')
-    parser.add_argument('--services', nargs='+', default=["ec2", "cloudtrail_events"],
-                      choices=["ec2", "rds", "redshift", "vpc", "subnets", "cloudtrail_events"],
+    parser.add_argument('--services', nargs='+', default=["ec2", "cloudtrail"],
+                      choices=["ec2", "rds", "redshift", "vpc", "subnets", "cloudtrail"],
                       help='Servicios a consultar')
     main(parser.parse_args().services)

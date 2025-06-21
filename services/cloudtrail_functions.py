@@ -41,7 +41,7 @@ def extract_basic_info(event_detail):
         "resource_id": resource_id
     }
 
-def get_important_cloudtrail_events(region, credentials):
+def get_all_cloudtrail_events(region, credentials):
     """Obtiene eventos importantes de CloudTrail del último día."""
     client = create_aws_client("cloudtrail", region, credentials)
     if not client:
@@ -88,3 +88,70 @@ def get_important_cloudtrail_events(region, credentials):
                 break
 
     return {"events": all_events}
+
+def insert_or_update_cloudtrail_events(events_data):
+    """Inserta eventos de CloudTrail en la base de datos."""
+    if not events_data:
+        return {"processed": 0, "inserted": 0}
+
+    from services.utils import get_db_connection
+    
+    conn = get_db_connection()
+    if not conn:
+        return {"error": "DB connection failed", "processed": 0, "inserted": 0}
+
+    query_insert = """
+        INSERT INTO cloudtrail_events (
+            event_id, event_time, event_name, user_name, resource_name,
+            resource_type, region, event_source, last_updated
+        ) VALUES (
+            %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
+        )
+    """
+
+    inserted = 0
+    processed = 0
+
+    try:
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT event_id FROM cloudtrail_events")
+        existing_events = {row[0] for row in cursor.fetchall()}
+
+        for event in events_data:
+            event_id = event["event_id"]
+            processed += 1
+
+            if event_id not in existing_events:
+                resource_type = {
+                    "ec2.amazonaws.com": "EC2",
+                    "rds.amazonaws.com": "RDS", 
+                    "redshift.amazonaws.com": "Redshift"
+                }.get(event["event_source"], "Unknown")
+
+                insert_values = (
+                    event_id,
+                    event["event_time"],
+                    event["event_name"],
+                    event["user_name"],
+                    event["resource_id"],
+                    resource_type,
+                    event["region"],
+                    event["event_source"]
+                )
+                
+                cursor.execute(query_insert, insert_values)
+                inserted += 1
+
+        conn.commit()
+        return {
+            "processed": processed,
+            "inserted": inserted
+        }
+
+    except Exception as e:
+        conn.rollback()
+        print(f"[ERROR] DB: cloudtrail_events - {str(e)}")
+        return {"error": str(e), "processed": 0, "inserted": 0}
+    finally:
+        conn.close()
