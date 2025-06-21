@@ -129,68 +129,64 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
     return {"events": all_events}
 
 def insert_or_update_cloudtrail_events(events_data):
-    """Inserta eventos de CloudTrail en la base de datos con timeout."""
+    """Inserta eventos de CloudTrail en la base de datos."""
     if not events_data:
         return {"processed": 0, "inserted": 0}
 
-    import sys
     from services.utils import get_db_connection
-    
-    print(f"[CLOUDTRAIL] Iniciando inserción de {len(events_data)} eventos", flush=True)
-    
-    # Limitar a máximo 100 eventos para evitar timeout
-    if len(events_data) > 100:
-        print(f"[CLOUDTRAIL] Limitando a 100 eventos de {len(events_data)} para evitar timeout", flush=True)
-        events_data = events_data[:100]
     
     conn = get_db_connection()
     if not conn:
-        print("[ERROR] No se pudo conectar a la BD", flush=True)
         return {"error": "DB connection failed", "processed": 0, "inserted": 0}
+
+    query_insert = """
+        INSERT INTO cloudtrail_events (
+            event_id, event_time, event_name, user_name, resource_name,
+            resource_type, region, event_source, account_id, account_name, last_updated
+        ) VALUES (
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
+        )
+    """
+
+    inserted = 0
+    processed = 0
 
     try:
         cursor = conn.cursor()
-        inserted = 0
-        
-        # Inserción rápida sin verificación individual
-        for i, event in enumerate(events_data, 1):
-            if i % 25 == 0:
-                print(f"[CLOUDTRAIL] {i}/{len(events_data)}...", flush=True)
-            
-            resource_type = {
-                "ec2.amazonaws.com": "EC2",
-                "rds.amazonaws.com": "RDS", 
-                "redshift.amazonaws.com": "Redshift"
-            }.get(event["event_source"], "Unknown")
-            
-            try:
-                cursor.execute("""
-                    INSERT INTO cloudtrail_events (
-                        event_id, event_time, event_name, user_name, resource_name,
-                        resource_type, region, event_source, account_id, account_name, last_updated
-                    ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
-                    )
-                """, (
-                    event["event_id"], event["event_time"], event["event_name"],
+
+        # Obtener eventos existentes
+        cursor.execute("SELECT event_id FROM cloudtrail_events")
+        existing_events = {row[0] for row in cursor.fetchall()}
+
+        for event in events_data:
+            event_id = event["event_id"]
+            processed += 1
+
+            if event_id not in existing_events:
+                resource_type = {
+                    "ec2.amazonaws.com": "EC2",
+                    "rds.amazonaws.com": "RDS", 
+                    "redshift.amazonaws.com": "Redshift"
+                }.get(event["event_source"], "Unknown")
+
+                insert_values = (
+                    event_id, event["event_time"], event["event_name"],
                     event["user_name"], event["resource_id"], resource_type,
                     event["region"], event["event_source"], event["account_id"], event["account_name"]
-                ))
+                )
+                
+                cursor.execute(query_insert, insert_values)
                 inserted += 1
-            except:
-                pass  # Ignorar duplicados silenciosamente
-        
+
         conn.commit()
-        print(f"[CLOUDTRAIL] Completado: {inserted} insertados", flush=True)
-        
         return {
-            "processed": len(events_data),
+            "processed": processed,
             "inserted": inserted
         }
 
     except Exception as e:
         conn.rollback()
-        print(f"[ERROR] CloudTrail DB: {str(e)[:100]}...", flush=True)
+        print(f"[ERROR] DB: cloudtrail_events - {str(e)}")
         return {"error": str(e), "processed": 0, "inserted": 0}
     finally:
         conn.close()
