@@ -41,7 +41,7 @@ def extract_basic_info(event_detail):
         "resource_id": resource_id
     }
 
-def get_all_cloudtrail_events(region, credentials):
+def get_all_cloudtrail_events(region, credentials, account_id, account_name):
     """Obtiene eventos importantes de CloudTrail del último día."""
     client = create_aws_client("cloudtrail", region, credentials)
     if not client:
@@ -79,7 +79,9 @@ def get_all_cloudtrail_events(region, credentials):
                         "event_time": event.get("EventTime"),
                         **basic_info,
                         "region": region,
-                        "event_source": detail.get("eventSource", source)
+                        "event_source": detail.get("eventSource", source),
+                        "account_id": account_id,
+                        "account_name": account_name
                     })
                 except Exception as e:
                     print(f"[ERROR] Procesando evento: {e}")
@@ -123,9 +125,9 @@ def insert_or_update_cloudtrail_events(events_data):
             cursor.execute("""
                 INSERT INTO cloudtrail_events (
                     event_id, event_time, event_name, user_name, resource_name,
-                    resource_type, region, event_source, last_updated
+                    resource_type, region, event_source, account_id, account_name, last_updated
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
                 )
             """, (
                 event["event_id"],
@@ -135,7 +137,9 @@ def insert_or_update_cloudtrail_events(events_data):
                 event["resource_id"],
                 resource_type,
                 event["region"],
-                event["event_source"]
+                event["event_source"],
+                event["account_id"],
+                event["account_name"]
             ))
             inserted += 1
 

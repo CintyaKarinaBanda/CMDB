@@ -42,7 +42,7 @@ def process_account_region(account_id, role_name, account_name, region, services
         "redshift": lambda: get_redshift_clusters(region, creds, account_id, account_name),
         "vpc": lambda: get_vpc_details(region, creds, account_id, account_name),
         "subnets": lambda: get_subnets_details(region, creds, account_id, account_name),
-        "cloudtrail": lambda: get_all_cloudtrail_events(region, creds).get("events", [])
+        "cloudtrail": lambda: get_all_cloudtrail_events(region, creds, account_id, account_name).get("events", [])
     }
 
     result = {"account_id": account_id, "region": region, "credentials": creds}
