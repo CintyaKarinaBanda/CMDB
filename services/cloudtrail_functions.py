@@ -120,28 +120,59 @@ def extract_changes(event_detail):
     resp = event_detail.get("responseElements", {})
     event_name = event_detail.get("eventName", "")
     
+    # Debug temporal
+    if event_name in ["CreateTags", "StartInstances", "StopInstances"]:
+        print(f"[DEBUG] {event_name} - req: {req}", flush=True)
+        print(f"[DEBUG] {event_name} - resp: {resp}", flush=True)
+    
     changes = {}
     
-    # Tags
+    # Tags - estructura corregida
     if event_name in ["CreateTags", "DeleteTags"]:
-        if "resourcesSet" in req:
+        # Buscar tags en diferentes estructuras posibles
+        if "tagSet" in req:
             tags = []
-            for item in req["resourcesSet"].get("items", []):
-                if "tagSet" in item:
-                    for tag in item["tagSet"].get("items", []):
-                        tags.append(f"{tag.get('key', '')}={tag.get('value', '')}")
+            tag_items = req["tagSet"].get("items", [])
+            for tag in tag_items:
+                key = tag.get("key", "")
+                value = tag.get("value", "")
+                tags.append(f"{key}={value}")
             if tags:
                 changes["tags"] = ", ".join(tags)
+        elif "resourcesSet" in req:
+            # Estructura alternativa
+            for item in req["resourcesSet"].get("items", []):
+                if "tagSet" in item:
+                    tags = []
+                    for tag in item["tagSet"].get("items", []):
+                        tags.append(f"{tag.get('key', '')}={tag.get('value', '')}")
+                    if tags:
+                        changes["tags"] = ", ".join(tags)
     
-    # EC2 Instances
+    # EC2 State changes
+    elif event_name in ["StartInstances", "StopInstances", "RebootInstances", "TerminateInstances"]:
+        if "instancesSet" in req:
+            instances = []
+            for item in req["instancesSet"].get("items", []):
+                if "instanceId" in item:
+                    instances.append(item["instanceId"])
+            if instances:
+                changes["instances"] = ", ".join(instances)
+                changes["action"] = event_name.replace("Instances", "").lower()
+    
+    # EC2 Creation
     elif event_name == "RunInstances":
-        changes["instance_type"] = req.get("instanceType")
-        changes["image_id"] = req.get("imageId")
-        changes["subnet_id"] = req.get("subnetId")
+        if req.get("instanceType"):
+            changes["instance_type"] = req["instanceType"]
+        if req.get("imageId"):
+            changes["image_id"] = req["imageId"]
+        if req.get("subnetId"):
+            changes["subnet_id"] = req["subnetId"]
+        if req.get("minCount"):
+            changes["instance_count"] = req["minCount"]
     
     elif event_name == "ModifyInstanceAttribute":
-        if "attribute" in req:
-            changes["attribute"] = req["attribute"]
+        changes["attribute"] = req.get("attribute")
         if "value" in req:
             changes["new_value"] = str(req["value"])
     
@@ -150,6 +181,10 @@ def extract_changes(event_detail):
         changes["db_instance_class"] = req.get("dBInstanceClass")
         changes["engine"] = req.get("engine")
         changes["engine_version"] = req.get("engineVersion")
+        changes["allocated_storage"] = req.get("allocatedStorage")
+    
+    elif event_name in ["StartDBInstance", "StopDBInstance", "RebootDBInstance"]:
+        changes["action"] = event_name.replace("DBInstance", "").lower()
     
     elif event_name == "ModifyDBInstance":
         modify_fields = ["dBInstanceClass", "allocatedStorage", "engineVersion"]
@@ -169,6 +204,16 @@ def extract_changes(event_detail):
     elif event_name == "CreateCluster":
         changes["node_type"] = req.get("nodeType")
         changes["number_of_nodes"] = req.get("numberOfNodes")
+    
+    elif event_name in ["PauseCluster", "ResumeCluster"]:
+        changes["action"] = event_name.replace("Cluster", "").lower()
+    
+    # Fallback: capturar campos importantes genéricos
+    if not changes:
+        important_fields = ["instanceType", "imageId", "cidrBlock", "engine", "nodeType"]
+        for field in important_fields:
+            if field in req and req[field]:
+                changes[field.lower()] = req[field]
     
     return json.dumps(changes) if changes else None
 
