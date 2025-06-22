@@ -120,34 +120,18 @@ def extract_changes(event_detail):
     resp = event_detail.get("responseElements", {})
     event_name = event_detail.get("eventName", "")
     
-    # Debug temporal
-    if event_name in ["CreateTags", "StartInstances", "StopInstances"]:
-        print(f"[DEBUG] {event_name} - req: {req}", flush=True)
-        print(f"[DEBUG] {event_name} - resp: {resp}", flush=True)
-    
     changes = {}
     
-    # Tags - estructura corregida
+    # Tags
     if event_name in ["CreateTags", "DeleteTags"]:
-        # Buscar tags en diferentes estructuras posibles
         if "tagSet" in req:
             tags = []
-            tag_items = req["tagSet"].get("items", [])
-            for tag in tag_items:
+            for tag in req["tagSet"].get("items", []):
                 key = tag.get("key", "")
                 value = tag.get("value", "")
                 tags.append(f"{key}={value}")
             if tags:
                 changes["tags"] = ", ".join(tags)
-        elif "resourcesSet" in req:
-            # Estructura alternativa
-            for item in req["resourcesSet"].get("items", []):
-                if "tagSet" in item:
-                    tags = []
-                    for tag in item["tagSet"].get("items", []):
-                        tags.append(f"{tag.get('key', '')}={tag.get('value', '')}")
-                    if tags:
-                        changes["tags"] = ", ".join(tags)
     
     # EC2 State changes
     elif event_name in ["StartInstances", "StopInstances", "RebootInstances", "TerminateInstances"]:
