@@ -21,7 +21,7 @@ def get_instance_changed_by(instance_id, update_date):
                 return result[0]
             return "unknown"
     except Exception as e:
-        print(f"[ERROR] changed_by: {instance_id} - {str(e)}")
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ERROR: changed_by {instance_id} - {str(e)}")
         return "unknown"
     finally:
         conn.close()
@@ -59,7 +59,7 @@ def get_rds_instances(region, credentials, account_id, account_name):
                 instances_info.append(info)
         return instances_info
     except ClientError as e:
-        print(f"Error getting RDS instances: {str(e)}")
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ERROR: RDS {region}/{account_id} - {str(e)}")
         return []
 
 def insert_or_update_rds_data(rds_data):
@@ -165,7 +165,7 @@ def insert_or_update_rds_data(rds_data):
 
     except Exception as e:
         conn.rollback()
-        print(f"DB operation failed: {str(e)}")
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ERROR: DB rds_data - {str(e)}")
         return {"error": str(e), "processed": 0, "inserted": 0, "updated": 0}
     finally:
         conn.close()

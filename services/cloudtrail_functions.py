@@ -264,7 +264,7 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
                         "account_name": account_name
                     })
                 except Exception as e:
-                    print(f"[ERROR] Procesando evento: {e}")
+                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ERROR: Evento - {e}")
 
             if not next_token:
                 break
@@ -321,7 +321,7 @@ def insert_or_update_cloudtrail_events(events_data):
 
     except Exception as e:
         conn.rollback()
-        print(f"[ERROR] DB: cloudtrail_events - {str(e)}")
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ERROR: DB cloudtrail_events - {str(e)}")
         return {"error": str(e), "processed": 0, "inserted": 0}
     finally:
         conn.close()

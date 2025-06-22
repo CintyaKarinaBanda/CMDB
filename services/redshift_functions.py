@@ -21,7 +21,7 @@ def get_cluster_changed_by(cluster_id, update_date):
                 return result[0]
             return "unknown"
     except Exception as e:
-        print(f"[ERROR] changed_by: {cluster_id} - {str(e)}")
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ERROR: changed_by {cluster_id} - {str(e)}")
         return "unknown"
     finally:
         conn.close()
@@ -63,10 +63,10 @@ def get_redshift_clusters(region, credentials, account_id, account_name):
                 clusters_info.append(info)
         
         if clusters_info:
-            print(f"INFO: Redshift en {region}: {len(clusters_info)} clusters encontrados")
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] INFO: Redshift {region}: {len(clusters_info)} encontrados")
         return clusters_info
     except ClientError as e:
-        print(f"[ERROR] Redshift: {region}/{account_id} - {str(e)}")
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ERROR: Redshift {region}/{account_id} - {str(e)}")
         return []
 
 def insert_or_update_redshift_data(redshift_data):
@@ -174,7 +174,7 @@ def insert_or_update_redshift_data(redshift_data):
 
     except Exception as e:
         conn.rollback()
-        print(f"[ERROR] DB: redshift_data - {str(e)}")
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ERROR: DB redshift_data - {str(e)}")
         return {"error": str(e), "processed": 0, "inserted": 0, "updated": 0}
     finally:
         conn.close()

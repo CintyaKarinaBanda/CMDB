@@ -21,7 +21,7 @@ def get_subnet_changed_by(subnet_id, update_date):
                 return result[0]
             return "unknown"
     except Exception as e:
-        print(f"[ERROR] changed_by: {subnet_id} - {str(e)}")
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ERROR: changed_by {subnet_id} - {str(e)}")
         return "unknown"
     finally:
         conn.close()
@@ -98,11 +98,11 @@ def get_subnets_details(region, credentials, account_id, account_name):
             })
 
         if subnet_info:
-            print(f"INFO: Subnets en {region}: {len(subnet_info)} subredes encontradas")
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] INFO: Subnets {region}: {len(subnet_info)} encontradas")
         return subnet_info
 
     except ClientError as e:
-        print(f"ERROR: Obtener subnets en {region} para cuenta {account_id}: {str(e)}")
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ERROR: Subnets {region}/{account_id} - {str(e)}")
         return []
 
 def insert_or_update_subnet_data(subnet_data):
@@ -211,7 +211,7 @@ def insert_or_update_subnet_data(subnet_data):
 
     except Exception as e:
         conn.rollback()
-        print(f"[ERROR] DB: subnet_data - {str(e)}")
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ERROR: DB subnet_data - {str(e)}")
         return {"error": str(e), "processed": 0, "inserted": 0, "updated": 0}
     finally:
         conn.close()
