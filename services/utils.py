@@ -4,7 +4,7 @@ import os
 import sys
 from datetime import datetime
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 from config import DB_USER, DB_PASSWORD, DB_HOST, DB_NAME
 
 def log(message):

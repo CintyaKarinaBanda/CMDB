@@ -2,26 +2,49 @@ from botocore.exceptions import ClientError
 from datetime import datetime
 from services.utils import create_aws_client, get_db_connection
 
-def get_instance_changed_by(instance_id, update_date):
-    """Busca el usuario que realizó el cambio más cercano a la fecha de actualización"""
+FIELD_EVENT_MAP = {
+    "dbname": ["CreateDBInstance", "ModifyDBInstance"],
+    "enginetype": ["CreateDBInstance"],
+    "engineversion": ["ModifyDBInstance"],
+    "storagesize": ["ModifyDBInstance"],
+    "instancetype": ["ModifyDBInstance"],
+    "status": ["StartDBInstance", "StopDBInstance", "RebootDBInstance", "CreateDBInstance", "DeleteDBInstance"],
+    "endpoint": ["CreateDBInstance", "ModifyDBInstance"],
+    "port": ["CreateDBInstance", "ModifyDBInstance"],
+    "hasreplica": ["CreateDBInstanceReadReplica", "DeleteDBInstance"]
+}
+
+def get_instance_changed_by(instance_id, field_name):
+    """Busca el usuario que cambió un campo específico"""
     conn = get_db_connection()
     if not conn:
         return "unknown"
     
     try:
         with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT user_name FROM cloudtrail_events
-                WHERE resource_type = 'RDS' AND resource_name = %s 
-                AND ABS(EXTRACT(EPOCH FROM (event_time - %s))) < 86400
-                ORDER BY ABS(EXTRACT(EPOCH FROM (event_time - %s))) ASC LIMIT 1
-            """, (instance_id, update_date, update_date))
+            possible_events = FIELD_EVENT_MAP.get(field_name, [])
+            
+            if possible_events:
+                placeholders = ','.join(['%s'] * len(possible_events))
+                query = f"""
+                    SELECT user_name FROM cloudtrail_events
+                    WHERE resource_name = %s AND resource_type = 'RDS'
+                    AND event_name IN ({placeholders})
+                    ORDER BY event_time DESC LIMIT 1
+                """
+                cursor.execute(query, (instance_id, *possible_events))
+            else:
+                cursor.execute("""
+                    SELECT user_name FROM cloudtrail_events
+                    WHERE resource_name = %s AND resource_type = 'RDS'
+                    ORDER BY event_time DESC LIMIT 1
+                """, (instance_id,))
             
             if result := cursor.fetchone():
                 return result[0]
             return "unknown"
     except Exception as e:
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ERROR: changed_by {instance_id} - {str(e)}")
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ERROR: changed_by {instance_id}/{field_name} - {str(e)}")
         return "unknown"
     finally:
         conn.close()
@@ -140,7 +163,7 @@ def insert_or_update_rds_data(rds_data):
                         values.append(new_val)
                         changed_by = get_instance_changed_by(
                             instance_id=instance_id,
-                            update_date=datetime.now()
+                            field_name=col
                         )
                         
                         cursor.execute(

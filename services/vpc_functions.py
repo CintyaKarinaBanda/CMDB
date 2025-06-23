@@ -3,26 +3,50 @@ from botocore.exceptions import ClientError
 from datetime import datetime
 from services.utils import create_aws_client, get_db_connection
 
-def get_vpc_changed_by(vpc_id, update_date):
-    """Busca el usuario que realizó el cambio más cercano a la fecha de actualización"""
+FIELD_EVENT_MAP = {
+    "vpc_name": ["CreateTags", "DeleteTags"],
+    "state": ["CreateVpc", "DeleteVpc"],
+    "subnets": ["CreateSubnet", "DeleteSubnet"],
+    "security_groups": ["CreateSecurityGroup", "DeleteSecurityGroup"],
+    "network_acls": ["CreateNetworkAcl", "DeleteNetworkAcl"],
+    "internet_gateways": ["CreateInternetGateway", "AttachInternetGateway", "DetachInternetGateway"],
+    "vpn_connections": ["CreateVpnConnection", "DeleteVpnConnection"],
+    "vpc_endpoints": ["CreateVpcEndpoint", "DeleteVpcEndpoint"],
+    "vpc_peerings": ["CreateVpcPeeringConnection", "DeleteVpcPeeringConnection"],
+    "route_rules": ["CreateRouteTable", "DeleteRouteTable"]
+}
+
+def get_vpc_changed_by(vpc_id, field_name):
+    """Busca el usuario que cambió un campo específico"""
     conn = get_db_connection()
     if not conn:
         return "unknown"
     
     try:
         with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT user_name FROM cloudtrail_events
-                WHERE resource_type = 'VPC' AND resource_name = %s 
-                AND ABS(EXTRACT(EPOCH FROM (event_time - %s))) < 86400
-                ORDER BY ABS(EXTRACT(EPOCH FROM (event_time - %s))) ASC LIMIT 1
-            """, (vpc_id, update_date, update_date))
+            possible_events = FIELD_EVENT_MAP.get(field_name, [])
+            
+            if possible_events:
+                placeholders = ','.join(['%s'] * len(possible_events))
+                query = f"""
+                    SELECT user_name FROM cloudtrail_events
+                    WHERE resource_name = %s AND resource_type = 'EC2'
+                    AND event_name IN ({placeholders})
+                    ORDER BY event_time DESC LIMIT 1
+                """
+                cursor.execute(query, (vpc_id, *possible_events))
+            else:
+                cursor.execute("""
+                    SELECT user_name FROM cloudtrail_events
+                    WHERE resource_name = %s AND resource_type = 'EC2'
+                    ORDER BY event_time DESC LIMIT 1
+                """, (vpc_id,))
             
             if result := cursor.fetchone():
                 return result[0]
             return "unknown"
     except Exception as e:
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ERROR: changed_by {vpc_id} - {str(e)}")
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ERROR: changed_by {vpc_id}/{field_name} - {str(e)}")
         return "unknown"
     finally:
         conn.close()
@@ -216,7 +240,7 @@ def insert_or_update_vpc_data(vpc_data):
                         values.append(new_val)
                         changed_by = get_vpc_changed_by(
                             vpc_id=vpc_id,
-                            update_date=datetime.now()
+                            field_name=col
                         )
                         
                         cursor.execute(
