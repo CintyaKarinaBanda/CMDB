@@ -6,8 +6,8 @@ from botocore.exceptions import ClientError
 
 from listadoDeRoles import ROLES
 from config import Regions
-from services.ec2_service_refactored import EC2Service
 from services import (
+    get_ec2_instances, insert_or_update_ec2_data,
     get_rds_instances, insert_or_update_rds_data,
     get_redshift_clusters, insert_or_update_redshift_data,
     get_vpc_details, insert_or_update_vpc_data,
@@ -36,9 +36,8 @@ def process_account_region(account_id, role_name, account_name, region, services
         print(f"[{account_id}:{region}] Error al asumir rol: {creds['error']}")
         return {"account_id": account_id, "region": region, "error": creds["error"]}
 
-    ec2_service = EC2Service()
     service_funcs = {
-        "ec2": lambda: ec2_service.get_instances(region, creds, account_id, account_name),
+        "ec2": lambda: get_ec2_instances(region, creds, account_id, account_name),
         "rds": lambda: get_rds_instances(region, creds, account_id, account_name),
         "redshift": lambda: get_redshift_clusters(region, creds, account_id, account_name),
         "vpc": lambda: get_vpc_details(region, creds, account_id, account_name),
@@ -92,9 +91,8 @@ def main(services):
                     "region": res["region"], "account_id": res["account_id"]
                 } for d in res.get(key, [])])
 
-    ec2_service = EC2Service()
     insert_funcs = {
-        "ec2": ec2_service.insert_or_update_instances,
+        "ec2": insert_or_update_ec2_data,
         "rds": insert_or_update_rds_data,
         "redshift": insert_or_update_redshift_data,
         "vpc": insert_or_update_vpc_data,

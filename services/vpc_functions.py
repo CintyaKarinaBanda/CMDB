@@ -1,4 +1,3 @@
-import boto3
 from botocore.exceptions import ClientError
 from datetime import datetime
 from services.utils import create_aws_client, get_db_connection
@@ -51,20 +50,7 @@ def get_vpc_changed_by(vpc_id, field_name):
     finally:
         conn.close()
 
-def create_ec2_client(region, credentials):
-    if not credentials or "error" in credentials:
-        return None
-    try:
-        return boto3.client(
-            "ec2",
-            region_name=region,
-            aws_access_key_id=credentials["AccessKeyId"],
-            aws_secret_access_key=credentials["SecretAccessKey"],
-            aws_session_token=credentials["SessionToken"]
-        )
-    except Exception as e:
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ERROR: EC2 client - {str(e)}")
-        return None
+
 
 def get_vpc_details(region, credentials, account_id, account_name):
     ec2_client = create_aws_client("ec2", region, credentials)
