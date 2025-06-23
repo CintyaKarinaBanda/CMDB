@@ -272,7 +272,7 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
     return {"events": all_events}
 
 def insert_or_update_cloudtrail_events(events_data):
-    """Inserta eventos de CloudTrail en la base de datos."""
+    """Inserta eventos de CloudTrail en la base de datos usando batch insert."""
     if not events_data:
         return {"processed": 0, "inserted": 0}
 
@@ -282,12 +282,13 @@ def insert_or_update_cloudtrail_events(events_data):
     if not conn:
         return {"error": "DB connection failed", "processed": 0, "inserted": 0}
 
-    inserted = 0
     processed = len(events_data)
 
     try:
         cursor = conn.cursor()
         
+        # Preparar datos para batch insert
+        batch_data = []
         for event in events_data:
             resource_type = {
                 "ec2.amazonaws.com": "EC2",
@@ -295,24 +296,25 @@ def insert_or_update_cloudtrail_events(events_data):
                 "redshift.amazonaws.com": "Redshift"
             }.get(event["event_source"], "Unknown")
 
-            cursor.execute("""
-                INSERT INTO cloudtrail_events (
-                    event_id, event_time, event_name, user_name, resource_name,
-                    resource_type, region, event_source, account_id, account_name, changes, last_updated
-                ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
-                )
-                ON CONFLICT (event_id) DO NOTHING
-            """, (
+            batch_data.append((
                 event["event_id"], event["event_time"], event["event_name"],
                 event["user_name"], event["resource_name"], resource_type,
                 event["region"], event["event_source"], event["account_id"], 
                 event["account_name"], event.get("changes")
             ))
-            
-            if cursor.rowcount > 0:
-                inserted += 1
 
+        # Batch insert
+        cursor.executemany("""
+            INSERT INTO cloudtrail_events (
+                event_id, event_time, event_name, user_name, resource_name,
+                resource_type, region, event_source, account_id, account_name, changes, last_updated
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
+            )
+            ON CONFLICT (event_id) DO NOTHING
+        """, batch_data)
+        
+        inserted = cursor.rowcount
         conn.commit()
         return {
             "processed": processed,
