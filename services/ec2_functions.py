@@ -227,7 +227,7 @@ def insert_or_update_ec2_data(ec2_data):
                         values.append(new_val)
                         changed_by = get_instance_changed_by(
                             instance_id=instance_id,
-                            col=col
+                            field_name = col
                         )
                         
                         cursor.execute(
