@@ -4,7 +4,6 @@ from services.utils import create_aws_client, get_db_connection
 
 FIELD_EVENT_MAP = {
     "bucket_name": ["CreateBucket", "DeleteBucket"],
-    "app_id": ["CreateTags", "DeleteTags", "PutBucketTagging"],
     "bucket_name_display": ["CreateTags", "DeleteTags", "PutBucketTagging"],
     "region": ["CreateBucket"],
     "status": ["CreateBucket", "DeleteBucket"],
@@ -165,7 +164,6 @@ def extract_bucket_data(bucket, s3_client, account_name, account_id, region):
             "AccountName": account_name,
             "AccountID": account_id,
             "BucketName": bucket_name,
-            "AppId": get_tag("AppId"),
             "BucketNameDisplay": get_tag("Name") if get_tag("Name") != "N/A" else bucket_name,
             "Region": bucket_region,
             "Status": "Active",
@@ -214,11 +212,11 @@ def insert_or_update_s3_data(s3_data):
 
     query_insert = """
         INSERT INTO s3 (
-            account_name, account_id, bucket_name, app_id, bucket_name_display,
+            account_name, account_id, bucket_name, bucket_name_display,
             region, status, owner, integrations, network_config,
             backup_recovery, encryption, versioning, capacity, last_updated
         ) VALUES (
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s, %s, %s, %s, %s,
             %s, %s, %s, %s, CURRENT_TIMESTAMP
         )
     """
@@ -245,7 +243,7 @@ def insert_or_update_s3_data(s3_data):
 
             insert_values = (
                 bucket["AccountName"], bucket["AccountID"], bucket["BucketName"],
-                bucket["AppId"], bucket["BucketNameDisplay"], bucket["Region"],
+                bucket["BucketNameDisplay"], bucket["Region"],
                 bucket["Status"], bucket["Owner"], bucket["Integrations"],
                 bucket["NetworkConfig"], bucket["BackupRecovery"], bucket["Encryption"],
                 bucket["Versioning"], bucket["Capacity"]
@@ -263,7 +261,6 @@ def insert_or_update_s3_data(s3_data):
                     "account_name": bucket["AccountName"],
                     "account_id": bucket["AccountID"],
                     "bucket_name": bucket["BucketName"],
-                    "app_id": bucket["AppId"],
                     "bucket_name_display": bucket["BucketNameDisplay"],
                     "region": bucket["Region"],
                     "status": bucket["Status"],
