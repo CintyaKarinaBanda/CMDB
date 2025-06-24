@@ -53,28 +53,48 @@ def get_bucket_changed_by(bucket_name, field_name):
         conn.close()
 
 def get_bucket_size(s3_client, bucket_name):
-    """Obtiene el tamaño del bucket usando CloudWatch metrics"""
+    """Obtiene el tamaño total del bucket usando CloudWatch metrics"""
     try:
-        cloudwatch = s3_client._client_config.region_name
+        from datetime import timedelta
         import boto3
-        cw_client = boto3.client('cloudwatch', region_name=cloudwatch)
         
-        response = cw_client.get_metric_statistics(
-            Namespace='AWS/S3',
-            MetricName='BucketSizeBytes',
-            Dimensions=[
-                {'Name': 'BucketName', 'Value': bucket_name},
-                {'Name': 'StorageType', 'Value': 'StandardStorage'}
-            ],
-            StartTime=datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0),
-            EndTime=datetime.utcnow(),
-            Period=86400,
-            Statistics=['Average']
-        )
+        # Crear cliente CloudWatch en la misma región
+        region = s3_client._client_config.region_name or 'us-east-1'
+        cw_client = boto3.client('cloudwatch', region_name=region)
         
-        if response['Datapoints']:
-            return int(response['Datapoints'][-1]['Average'])
-        return 0
+        # Obtener métricas de los últimos 2 días para asegurar datos
+        end_time = datetime.utcnow()
+        start_time = end_time - timedelta(days=2)
+        
+        total_size = 0
+        storage_types = ['StandardStorage', 'StandardIAStorage', 'ReducedRedundancyStorage', 
+                        'GlacierStorage', 'DeepArchiveStorage', 'IntelligentTieringFAStorage',
+                        'IntelligentTieringIAStorage', 'IntelligentTieringAAStorage',
+                        'IntelligentTieringAIAStorage', 'IntelligentTieringDAAStorage']
+        
+        for storage_type in storage_types:
+            try:
+                response = cw_client.get_metric_statistics(
+                    Namespace='AWS/S3',
+                    MetricName='BucketSizeBytes',
+                    Dimensions=[
+                        {'Name': 'BucketName', 'Value': bucket_name},
+                        {'Name': 'StorageType', 'Value': storage_type}
+                    ],
+                    StartTime=start_time,
+                    EndTime=end_time,
+                    Period=86400,
+                    Statistics=['Maximum']
+                )
+                
+                if response['Datapoints']:
+                    # Tomar el valor más reciente
+                    latest_datapoint = max(response['Datapoints'], key=lambda x: x['Timestamp'])
+                    total_size += int(latest_datapoint['Maximum'])
+            except Exception:
+                continue
+        
+        return total_size
     except Exception:
         return 0
 
