@@ -16,10 +16,13 @@ IMPORTANT_EVENTS = {
     "AttachInternetGateway", "DetachInternetGateway", "CreateNatGateway",
     "DeleteNatGateway", "CreateCluster", "DeleteCluster", "ModifyCluster",
     "RebootCluster", "ResizeCluster", "PauseCluster", "ResumeCluster",
-    "RestoreFromClusterSnapshot", "CreateClusterSnapshot", "DeleteClusterSnapshot"
+    "RestoreFromClusterSnapshot", "CreateClusterSnapshot", "DeleteClusterSnapshot",
+    "CreateBucket", "DeleteBucket", "PutBucketTagging", "PutBucketEncryption",
+    "PutBucketVersioning", "PutBucketNotification", "PutPublicAccessBlock",
+    "PutBucketReplication", "DeleteBucketReplication", "PutBucketAcl", "PutBucketPolicy"
 }
 
-EVENT_SOURCES = ["ec2.amazonaws.com", "rds.amazonaws.com", "redshift.amazonaws.com"]
+EVENT_SOURCES = ["ec2.amazonaws.com", "rds.amazonaws.com", "redshift.amazonaws.com", "s3.amazonaws.com"]
 
 def extract_resource_name(event_detail):
     """Extrae resource_name siguiendo el patrón exacto de AWS CloudTrail Console."""
@@ -64,6 +67,13 @@ def extract_resource_name(event_detail):
             if field in req and req[field]:
                 return req[field]
     
+    # S3 Events
+    elif event_source == "s3.amazonaws.com":
+        s3_fields = ["bucketName", "bucket"]
+        for field in s3_fields:
+            if field in req and req[field]:
+                return req[field]
+    
     # Prioridad 3: responseElements para recursos recién creados
     if event_name == "RunInstances" and "instances" in resp:
         instances = resp["instances"]
@@ -72,7 +82,7 @@ def extract_resource_name(event_detail):
     
     # Campos comunes en responseElements
     response_fields = ["instanceId", "dBInstanceIdentifier", "clusterIdentifier", 
-                      "vpcId", "subnetId", "volumeId", "groupId"]
+                      "vpcId", "subnetId", "volumeId", "groupId", "bucketName"]
     for field in response_fields:
         if field in resp and resp[field]:
             return resp[field]
@@ -110,6 +120,9 @@ def is_valid_resource(resource_name, event_source):
         return True
     # Redshift
     if event_source == "redshift.amazonaws.com":
+        return True
+    # S3
+    if event_source == "s3.amazonaws.com":
         return True
     
     return False
@@ -191,6 +204,29 @@ def extract_changes(event_detail):
     
     elif event_name in ["PauseCluster", "ResumeCluster"]:
         changes["action"] = event_name.replace("Cluster", "").lower()
+    
+    # S3 Events
+    elif event_name == "CreateBucket":
+        changes["bucket_name"] = req.get("bucketName")
+        changes["region"] = req.get("CreateBucketConfiguration", {}).get("LocationConstraint")
+    
+    elif event_name == "DeleteBucket":
+        changes["bucket_name"] = req.get("bucketName")
+        changes["action"] = "delete"
+    
+    elif event_name == "PutBucketTagging":
+        if "Tagging" in req and "TagSet" in req["Tagging"]:
+            tags = []
+            for tag in req["Tagging"]["TagSet"]:
+                key = tag.get("Key", "")
+                value = tag.get("Value", "")
+                tags.append(f"{key}={value}")
+            if tags:
+                changes["tags"] = ", ".join(tags)
+    
+    elif event_name in ["PutBucketEncryption", "PutBucketVersioning", "PutBucketNotification", "PutPublicAccessBlock", "PutBucketReplication", "PutBucketAcl", "PutBucketPolicy"]:
+        changes["configuration"] = event_name.replace("PutBucket", "").lower()
+        changes["bucket_name"] = req.get("bucketName")
     
     # Fallback: capturar campos importantes genéricos
     if not changes:
@@ -293,7 +329,8 @@ def insert_or_update_cloudtrail_events(events_data):
             resource_type = {
                 "ec2.amazonaws.com": "EC2",
                 "rds.amazonaws.com": "RDS", 
-                "redshift.amazonaws.com": "Redshift"
+                "redshift.amazonaws.com": "Redshift",
+                "s3.amazonaws.com": "S3"
             }.get(event["event_source"], "Unknown")
 
             batch_data.append((
