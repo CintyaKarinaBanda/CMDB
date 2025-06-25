@@ -52,7 +52,7 @@ def get_bucket_changed_by(bucket_name, field_name):
         conn.close()
 
 def get_bucket_size(s3_client, bucket_name):
-    """Obtiene el tamaño total del bucket usando CloudWatch metrics"""
+    """Obtiene el tamaño del bucket usando CloudWatch metrics"""
     try:
         from datetime import timedelta
         import boto3
@@ -65,35 +65,25 @@ def get_bucket_size(s3_client, bucket_name):
         end_time = datetime.utcnow()
         start_time = end_time - timedelta(days=2)
         
-        total_size = 0
-        storage_types = ['StandardStorage', 'StandardIAStorage', 'ReducedRedundancyStorage', 
-                        'GlacierStorage', 'DeepArchiveStorage', 'IntelligentTieringFAStorage',
-                        'IntelligentTieringIAStorage', 'IntelligentTieringAAStorage',
-                        'IntelligentTieringAIAStorage', 'IntelligentTieringDAAStorage']
+        response = cw_client.get_metric_statistics(
+            Namespace='AWS/S3',
+            MetricName='BucketSizeBytes',
+            Dimensions=[
+                {'Name': 'BucketName', 'Value': bucket_name},
+                {'Name': 'StorageType', 'Value': 'StandardStorage'}
+            ],
+            StartTime=start_time,
+            EndTime=end_time,
+            Period=86400,
+            Statistics=['Average']
+        )
         
-        for storage_type in storage_types:
-            try:
-                response = cw_client.get_metric_statistics(
-                    Namespace='AWS/S3',
-                    MetricName='BucketSizeBytes',
-                    Dimensions=[
-                        {'Name': 'BucketName', 'Value': bucket_name},
-                        {'Name': 'StorageType', 'Value': storage_type}
-                    ],
-                    StartTime=start_time,
-                    EndTime=end_time,
-                    Period=86400,
-                    Statistics=['Maximum']
-                )
-                
-                if response['Datapoints']:
-                    # Tomar el valor más reciente
-                    latest_datapoint = max(response['Datapoints'], key=lambda x: x['Timestamp'])
-                    total_size += int(latest_datapoint['Maximum'])
-            except Exception:
-                continue
+        if response['Datapoints']:
+            # Tomar el valor más reciente
+            latest_datapoint = max(response['Datapoints'], key=lambda x: x['Timestamp'])
+            return int(latest_datapoint['Average'])
         
-        return total_size
+        return 0
     except Exception:
         return 0
 
