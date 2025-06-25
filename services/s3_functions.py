@@ -51,6 +51,8 @@ def get_bucket_changed_by(bucket_name, field_name):
     finally:
         conn.close()
 
+# ... (tus imports y constantes se mantienen iguales)
+
 def get_bucket_size(s3_client, bucket_name):
     """Obtiene el tamaño total del bucket usando métricas de CloudWatch."""
     try:
@@ -60,12 +62,10 @@ def get_bucket_size(s3_client, bucket_name):
         region = s3_client._client_config.region_name or 'us-east-1'
         cw_client = boto3.client('cloudwatch', region_name=region)
 
-        # Pide datos de al menos 4 días atrás y usa medianoche como punto de inicio
         end_time = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
         start_time = end_time - timedelta(days=5)
 
-        storage_types = ['StandardStorage']  # Puedes agregar más si quieres sumar varios
-
+        storage_types = ['StandardStorage']
         total_bytes = 0
 
         for storage_type in storage_types:
@@ -80,19 +80,22 @@ def get_bucket_size(s3_client, bucket_name):
                     StartTime=start_time,
                     EndTime=end_time,
                     Period=86400,
-                    Statistics=['Maximum']  # Cambiado de 'Average' a 'Maximum'
+                    Statistics=['Maximum']
                 )
 
                 datapoints = response.get('Datapoints', [])
                 if datapoints:
                     latest = max(datapoints, key=lambda x: x['Timestamp'])
-                    total_bytes += int(latest['Maximum'])  # Cambiado a Maximum
+                    value = latest.get('Maximum', 0)
+                    if value > 0:
+                        total_bytes += int(value)
+
             except Exception as e:
                 print(f"Error al obtener métrica para {storage_type}: {e}")
                 continue
 
         if total_bytes == 0:
-            return "0 B"
+            return None
 
         for unit, factor in [('GB', 1024**3), ('MB', 1024**2), ('KB', 1024)]:
             if total_bytes >= factor:
@@ -102,50 +105,46 @@ def get_bucket_size(s3_client, bucket_name):
 
     except Exception as e:
         print(f"Error general en get_bucket_size para {bucket_name}: {e}")
-        return "0 B"
+        return None
 
 
 def extract_bucket_data(bucket, s3_client, account_name, account_id, region):
     """Extrae datos relevantes del bucket"""
     bucket_name = bucket['Name']
-    
+
     try:
-        # Obtener tags
         try:
             tags_response = s3_client.get_bucket_tagging(Bucket=bucket_name)
             tags = tags_response.get('TagSet', [])
         except ClientError:
             tags = []
-        
+
         get_tag = lambda key: next((t["Value"] for t in tags if t["Key"] == key), "N/A")
-        
-        # Obtener configuraciones
+
         try:
             versioning = s3_client.get_bucket_versioning(Bucket=bucket_name)
             versioning_status = versioning.get('Status', 'Disabled')
         except ClientError:
             versioning_status = "N/A"
-        
+
         try:
             encryption = s3_client.get_bucket_encryption(Bucket=bucket_name)
             encryption_config = "Enabled" if encryption.get('ServerSideEncryptionConfiguration') else "Disabled"
         except ClientError:
             encryption_config = "Disabled"
-        
+
         try:
             location = s3_client.get_bucket_location(Bucket=bucket_name)
             bucket_region = location.get('LocationConstraint') or 'us-east-1'
         except ClientError:
             bucket_region = region
-        
-        # Obtener configuración de red/acceso público
+
         try:
             public_access = s3_client.get_public_access_block(Bucket=bucket_name)
             network_config = "Private" if public_access.get('PublicAccessBlockConfiguration', {}).get('BlockPublicAcls') else "Public"
         except ClientError:
             network_config = "Unknown"
-        
-        # Obtener notificaciones (integraciones)
+
         try:
             notifications = s3_client.get_bucket_notification_configuration(Bucket=bucket_name)
             integrations = []
@@ -158,16 +157,16 @@ def extract_bucket_data(bucket, s3_client, account_name, account_id, region):
             integrations_str = ",".join(integrations) if integrations else "None"
         except ClientError:
             integrations_str = "None"
-        
-        # Obtener replicación (backup)
+
         try:
             replication = s3_client.get_bucket_replication(Bucket=bucket_name)
             backup_recovery = "Enabled" if replication.get('ReplicationConfiguration') else "Disabled"
         except ClientError:
             backup_recovery = "Disabled"
-        
-        capacity = get_bucket_size(s3_client, bucket_name)
-        
+
+        raw_capacity = get_bucket_size(s3_client, bucket_name)
+        capacity = raw_capacity if raw_capacity else "N/A"
+
         return {
             "AccountName": account_name,
             "AccountID": account_id,
@@ -183,9 +182,123 @@ def extract_bucket_data(bucket, s3_client, account_name, account_id, region):
             "Versioning": versioning_status,
             "Capacity": capacity
         }
+
     except Exception as e:
         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ERROR: Extract bucket {bucket_name} - {str(e)}")
         return None
+
+
+def insert_or_update_s3_data(s3_data):
+    """Inserta o actualiza datos de S3 con seguimiento de cambios"""
+    if not s3_data:
+        return {"processed": 0, "inserted": 0, "updated": 0}
+
+    conn = get_db_connection()
+    if not conn:
+        return {"error": "DB connection failed", "processed": 0, "inserted": 0, "updated": 0}
+
+    query_insert = """
+        INSERT INTO s3 (
+            account_name, account_id, bucket_name, bucket_name_display,
+            region, status, owner, integrations, network_config,
+            backup_recovery, encryption, versioning, capacity, last_updated
+        ) VALUES (
+            %s, %s, %s, %s, %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, CURRENT_TIMESTAMP
+        )
+    """
+
+    query_change_history = """
+        INSERT INTO s3_changes_history (bucket_name, field_name, old_value, new_value, changed_by)
+        VALUES (%s, %s, %s, %s, %s)
+    """
+
+    inserted = 0
+    updated = 0
+    processed = 0
+
+    try:
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT * FROM s3")
+        columns = [desc[0].lower() for desc in cursor.description]
+        existing_data = {row[columns.index("bucket_name")]: dict(zip(columns, row)) for row in cursor.fetchall()}
+
+        for bucket in s3_data:
+            bucket_name = bucket["BucketName"]
+            processed += 1
+
+            insert_values = (
+                bucket["AccountName"], bucket["AccountID"], bucket["BucketName"],
+                bucket["BucketNameDisplay"], bucket["Region"],
+                bucket["Status"], bucket["Owner"], bucket["Integrations"],
+                bucket["NetworkConfig"], bucket["BackupRecovery"], bucket["Encryption"],
+                bucket["Versioning"], bucket["Capacity"]
+            )
+
+            if bucket_name not in existing_data:
+                cursor.execute(query_insert, insert_values)
+                inserted += 1
+            else:
+                db_row = existing_data[bucket_name]
+                updates = []
+                values = []
+
+                campos = {
+                    "account_name": bucket["AccountName"],
+                    "account_id": bucket["AccountID"],
+                    "bucket_name": bucket["BucketName"],
+                    "bucket_name_display": bucket["BucketNameDisplay"],
+                    "region": bucket["Region"],
+                    "status": bucket["Status"],
+                    "owner": bucket["Owner"],
+                    "integrations": bucket["Integrations"],
+                    "network_config": bucket["NetworkConfig"],
+                    "backup_recovery": bucket["BackupRecovery"],
+                    "encryption": bucket["Encryption"],
+                    "versioning": bucket["Versioning"],
+                    "capacity": bucket["Capacity"]
+                }
+
+                for col, new_val in campos.items():
+                    old_val = db_row.get(col)
+
+                    if col == "capacity" and new_val == "N/A":
+                        continue  # Ignora cambios si la capacidad no fue calculada
+
+                    if str(old_val) != str(new_val):
+                        updates.append(f"{col} = %s")
+                        values.append(new_val)
+                        changed_by = get_bucket_changed_by(
+                            bucket_name=bucket_name,
+                            field_name=col
+                        )
+                        cursor.execute(
+                            query_change_history,
+                            (bucket_name, col, str(old_val), str(new_val), changed_by)
+                        )
+
+                updates.append("last_updated = CURRENT_TIMESTAMP")
+
+                if updates:
+                    update_query = f"UPDATE s3 SET {', '.join(updates)} WHERE bucket_name = %s"
+                    values.append(bucket_name)
+                    cursor.execute(update_query, tuple(values))
+                    updated += 1
+
+        conn.commit()
+        return {
+            "processed": processed,
+            "inserted": inserted,
+            "updated": updated
+        }
+
+    except Exception as e:
+        conn.rollback()
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ERROR: DB s3_data - {str(e)}")
+        return {"error": str(e), "processed": 0, "inserted": 0, "updated": 0}
+    finally:
+        conn.close()
 
 def get_s3_buckets(region, credentials, account_id, account_name):
     """Obtiene buckets S3 de una cuenta"""
