@@ -16,29 +16,19 @@ def get_bucket_changed_by(bucket_name, field_name):
 
 def get_bucket_size(s3_client, bucket_name):
     try:
-        cw_client = boto3.client('cloudwatch', region_name=s3_client._client_config.region_name or 'us-east-1')
-        end_time = datetime.utcnow()
-        start_time = end_time - timedelta(days=2)
-        
-        storage_types = ['StandardStorage', 'StandardIAStorage', 'ReducedRedundancyStorage', 
-                        'GlacierStorage', 'DeepArchiveStorage', 'IntelligentTieringFAStorage']
-        
-        total_bytes = 0
-        for storage_type in storage_types:
-            try:
-                response = cw_client.get_metric_statistics(
-                    Namespace='AWS/S3', MetricName='BucketSizeBytes',
-                    Dimensions=[{'Name': 'BucketName', 'Value': bucket_name}, {'Name': 'StorageType', 'Value': storage_type}],
-                    StartTime=start_time, EndTime=end_time, Period=86400, Statistics=['Average']
-                )
-                if response['Datapoints']:
-                    total_bytes += int(max(response['Datapoints'], key=lambda x: x['Timestamp'])['Average'])
-            except: continue
-        
-        if total_bytes >= 1024**3: return f"{total_bytes / (1024**3):.2f} GB"
-        elif total_bytes >= 1024**2: return f"{total_bytes / (1024**2):.2f} MB"
-        elif total_bytes >= 1024: return f"{total_bytes / 1024:.2f} KB"
-        else: return f"{total_bytes} B"
+        cw_client = boto3.client('cloudwatch', region_name='us-east-1')
+        response = cw_client.get_metric_statistics(
+            Namespace='AWS/S3', MetricName='BucketSizeBytes',
+            Dimensions=[{'Name': 'BucketName', 'Value': bucket_name}, {'Name': 'StorageType', 'Value': 'StandardStorage'}],
+            StartTime=datetime.utcnow() - timedelta(days=2), EndTime=datetime.utcnow(),
+            Period=86400, Statistics=['Average']
+        )
+        if response['Datapoints']:
+            bytes_size = int(max(response['Datapoints'], key=lambda x: x['Timestamp'])['Average'])
+            if bytes_size >= 1024**2: return f"{bytes_size / (1024**2):.2f} MB"
+            elif bytes_size >= 1024: return f"{bytes_size / 1024:.2f} KB"
+            else: return f"{bytes_size} B"
+        return "0 B"
     except: return "0 B"
 
 def extract_bucket_data(bucket, s3_client, account_name, account_id, region):
