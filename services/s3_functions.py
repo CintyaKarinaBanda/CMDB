@@ -52,7 +52,7 @@ def get_bucket_changed_by(bucket_name, field_name):
         conn.close()
 
 def get_bucket_size(s3_client, bucket_name):
-    """Obtiene el tamaño del bucket usando CloudWatch metrics y lo convierte a unidad legible"""
+    """Obtiene el tamaño total del bucket consultando todos los tipos de almacenamiento"""
     try:
         from datetime import timedelta
         import boto3
@@ -61,39 +61,55 @@ def get_bucket_size(s3_client, bucket_name):
         region = s3_client._client_config.region_name or 'us-east-1'
         cw_client = boto3.client('cloudwatch', region_name=region)
         
-        # Obtener métricas de los últimos 2 días para asegurar datos
+        # Obtener métricas de los últimos 2 días
         end_time = datetime.utcnow()
         start_time = end_time - timedelta(days=2)
         
-        response = cw_client.get_metric_statistics(
-            Namespace='AWS/S3',
-            MetricName='BucketSizeBytes',
-            Dimensions=[
-                {'Name': 'BucketName', 'Value': bucket_name},
-                {'Name': 'StorageType', 'Value': 'StandardStorage'}
-            ],
-            StartTime=start_time,
-            EndTime=end_time,
-            Period=86400,
-            Statistics=['Average']
-        )
+        # Todos los tipos de almacenamiento según la documentación
+        storage_types = [
+            'StandardStorage', 'StandardIAStorage', 'StandardIASizeOverhead', 'StandardIAObjectOverhead',
+            'ReducedRedundancyStorage', 'OneZoneIAStorage', 'OneZoneIASizeOverhead',
+            'IntelligentTieringFAStorage', 'IntelligentTieringIAStorage', 'IntelligentTieringAAStorage',
+            'IntelligentTieringAIAStorage', 'IntelligentTieringDAAStorage',
+            'GlacierInstantRetrievalStorage', 'GlacierIRSizeOverhead',
+            'GlacierStorage', 'GlacierStagingStorage', 'GlacierObjectOverhead', 'GlacierS3ObjectOverhead',
+            'DeepArchiveStorage', 'DeepArchiveStagingStorage', 'DeepArchiveObjectOverhead', 'DeepArchiveS3ObjectOverhead',
+            'ExpressOneZoneStorage'
+        ]
         
-        if response['Datapoints']:
-            # Tomar el valor más reciente
-            latest_datapoint = max(response['Datapoints'], key=lambda x: x['Timestamp'])
-            bytes_size = int(latest_datapoint['Average'])
-            
-            # Convertir a unidad apropiada
-            if bytes_size >= 1024**3:  # GB
-                return f"{bytes_size / (1024**3):.2f} GB"
-            elif bytes_size >= 1024**2:  # MB
-                return f"{bytes_size / (1024**2):.2f} MB"
-            elif bytes_size >= 1024:  # KB
-                return f"{bytes_size / 1024:.2f} KB"
-            else:  # Bytes
-                return f"{bytes_size} B"
+        total_bytes = 0
         
-        return "0 B"
+        for storage_type in storage_types:
+            try:
+                response = cw_client.get_metric_statistics(
+                    Namespace='AWS/S3',
+                    MetricName='BucketSizeBytes',
+                    Dimensions=[
+                        {'Name': 'BucketName', 'Value': bucket_name},
+                        {'Name': 'StorageType', 'Value': storage_type}
+                    ],
+                    StartTime=start_time,
+                    EndTime=end_time,
+                    Period=86400,
+                    Statistics=['Average']
+                )
+                
+                if response['Datapoints']:
+                    latest_datapoint = max(response['Datapoints'], key=lambda x: x['Timestamp'])
+                    total_bytes += int(latest_datapoint['Average'])
+            except Exception:
+                continue
+        
+        # Convertir a unidad apropiada
+        if total_bytes >= 1024**3:  # GB
+            return f"{total_bytes / (1024**3):.2f} GB"
+        elif total_bytes >= 1024**2:  # MB
+            return f"{total_bytes / (1024**2):.2f} MB"
+        elif total_bytes >= 1024:  # KB
+            return f"{total_bytes / 1024:.2f} KB"
+        else:  # Bytes
+            return f"{total_bytes} B"
+        
     except Exception:
         return "0 B"
 
