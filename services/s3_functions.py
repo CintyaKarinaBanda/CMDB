@@ -57,22 +57,14 @@ def get_bucket_size(s3_client, bucket_name):
         import boto3
         from datetime import datetime, timedelta
 
-        # Determinar región correctamente
         region = s3_client._client_config.region_name or 'us-east-1'
-        if region is None or region == 'None':
-            region = 'us-east-1'
-
         cw_client = boto3.client('cloudwatch', region_name=region)
 
-        end_time = datetime.utcnow()
-        start_time = end_time - timedelta(days=3)
+        # Pide datos de al menos 4 días atrás y usa medianoche como punto de inicio
+        end_time = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        start_time = end_time - timedelta(days=5)
 
-        storage_types = [
-            'StandardStorage', 'StandardIAStorage', 'OneZoneIAStorage',
-            'ReducedRedundancyStorage', 'IntelligentTieringFAStorage',
-            'IntelligentTieringIAStorage', 'GlacierStorage',
-            'DeepArchiveStorage'
-        ]
+        storage_types = ['StandardStorage']  # Puedes agregar más si quieres sumar varios
 
         total_bytes = 0
 
@@ -88,23 +80,20 @@ def get_bucket_size(s3_client, bucket_name):
                     StartTime=start_time,
                     EndTime=end_time,
                     Period=86400,
-                    Statistics=['Average']
+                    Statistics=['Maximum']  # Cambiado de 'Average' a 'Maximum'
                 )
 
                 datapoints = response.get('Datapoints', [])
                 if datapoints:
-                    # Usar el datapoint más reciente
                     latest = max(datapoints, key=lambda x: x['Timestamp'])
-                    print(latest)
-                    total_bytes += int(latest['Average'])
-            except Exception:
-                continue  # Ignorar errores por storage_types que no apliquen
+                    total_bytes += int(latest['Maximum'])  # Cambiado a Maximum
+            except Exception as e:
+                print(f"Error al obtener métrica para {storage_type}: {e}")
+                continue
 
-        print(total_bytes)
         if total_bytes == 0:
             return "0 B"
 
-        # Convertir unidades
         for unit, factor in [('GB', 1024**3), ('MB', 1024**2), ('KB', 1024)]:
             if total_bytes >= factor:
                 return f"{total_bytes / factor:.2f} {unit}"
@@ -112,7 +101,7 @@ def get_bucket_size(s3_client, bucket_name):
         return f"{total_bytes} B"
 
     except Exception as e:
-        print(f"[{datetime.utcnow()}] ERROR: Bucket size for {bucket_name} - {str(e)}")
+        print(f"Error general en get_bucket_size para {bucket_name}: {e}")
         return "0 B"
 
 
