@@ -93,7 +93,7 @@ def get_s3_buckets(region, credentials, account_id, account_name):
                 if info: buckets_info.append(info)
         
         return buckets_info
-    except: return []()}
+    except: return []
 
 
 def insert_or_update_s3_data(s3_data):
