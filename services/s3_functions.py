@@ -78,23 +78,32 @@ def get_bucket_size(s3_client, bucket_name):
             Statistics=['Average']
         )
         
+        print(f"[DEBUG] Bucket: {bucket_name}, Datapoints: {len(response['Datapoints'])}")
+        
         if response['Datapoints']:
             # Tomar el valor más reciente
             latest_datapoint = max(response['Datapoints'], key=lambda x: x['Timestamp'])
             bytes_size = int(latest_datapoint['Average'])
             
+            print(f"[DEBUG] Bytes: {bytes_size}")
+            
             # Convertir a unidad apropiada
             if bytes_size >= 1024**3:  # GB
-                return f"{bytes_size / (1024**3):.2f} GB"
+                result = f"{bytes_size / (1024**3):.2f} GB"
             elif bytes_size >= 1024**2:  # MB
-                return f"{bytes_size / (1024**2):.2f} MB"
+                result = f"{bytes_size / (1024**2):.2f} MB"
             elif bytes_size >= 1024:  # KB
-                return f"{bytes_size / 1024:.2f} KB"
+                result = f"{bytes_size / 1024:.2f} KB"
             else:  # Bytes
-                return f"{bytes_size} B"
+                result = f"{bytes_size} B"
+            
+            print(f"[DEBUG] Result: {result}")
+            return result
         
+        print(f"[DEBUG] No datapoints for {bucket_name}")
         return "0 B"
-    except Exception:
+    except Exception as e:
+        print(f"[DEBUG] Error for {bucket_name}: {e}")
         return "0 B"
 
 def extract_bucket_data(bucket, s3_client, account_name, account_id, region):
