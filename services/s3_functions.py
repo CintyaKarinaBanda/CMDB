@@ -52,7 +52,7 @@ def get_bucket_changed_by(bucket_name, field_name):
         conn.close()
 
 def get_bucket_size(s3_client, bucket_name):
-    """Obtiene el tamaño del bucket usando CloudWatch metrics"""
+    """Obtiene el tamaño del bucket usando CloudWatch metrics y lo convierte a unidad legible"""
     try:
         from datetime import timedelta
         import boto3
@@ -81,11 +81,21 @@ def get_bucket_size(s3_client, bucket_name):
         if response['Datapoints']:
             # Tomar el valor más reciente
             latest_datapoint = max(response['Datapoints'], key=lambda x: x['Timestamp'])
-            return int(latest_datapoint['Average'])
+            bytes_size = int(latest_datapoint['Average'])
+            
+            # Convertir a unidad apropiada
+            if bytes_size >= 1024**3:  # GB
+                return f"{bytes_size / (1024**3):.2f} GB"
+            elif bytes_size >= 1024**2:  # MB
+                return f"{bytes_size / (1024**2):.2f} MB"
+            elif bytes_size >= 1024:  # KB
+                return f"{bytes_size / 1024:.2f} KB"
+            else:  # Bytes
+                return f"{bytes_size} B"
         
-        return 0
+        return "0 B"
     except Exception:
-        return 0
+        return "0 B"
 
 def extract_bucket_data(bucket, s3_client, account_name, account_id, region):
     """Extrae datos relevantes del bucket"""
