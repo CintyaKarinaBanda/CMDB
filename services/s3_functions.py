@@ -95,11 +95,12 @@ def get_bucket_size(s3_client, bucket_name):
                 if datapoints:
                     # Usar el datapoint más reciente
                     latest = max(datapoints, key=lambda x: x['Timestamp'])
+                    print(latest)
                     total_bytes += int(latest['Average'])
             except Exception:
                 continue  # Ignorar errores por storage_types que no apliquen
 
-        # Si no hay datos, retornar explícitamente
+        print(total_bytes)
         if total_bytes == 0:
             return "0 B"
 
