@@ -42,12 +42,14 @@ def get_bucket_size(bucket_name, cw_client):
                 datapoints = response.get('Datapoints', [])
                 if datapoints:
                     latest = max(datapoints, key=lambda x: x['Timestamp'])
+                    print(f"Datapoints for {bucket_name} ({storage_type}):")
+                    print(latest)
                     total_bytes += int(latest.get('Maximum', 0))
             except Exception as e:
                 print(f"Error storage {storage_type} para {bucket_name}: {e}")
                 continue
         
-        if total_bytes == 0: return "0 B"
+        if total_bytes == 0: return "0-0 B"
         if total_bytes >= 1024**4: return f"{total_bytes / (1024**4):.2f} TB"
         elif total_bytes >= 1024**3: return f"{total_bytes / (1024**3):.2f} GB"
         elif total_bytes >= 1024**2: return f"{total_bytes / (1024**2):.2f} MB"
