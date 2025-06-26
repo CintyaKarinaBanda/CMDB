@@ -14,6 +14,7 @@ def get_bucket_changed_by(bucket_name, field_name):
     finally: conn.close()
 
 def get_bucket_size(bucket_name, cw_client):
+    print('hi')
     if not cw_client: return "N/A-o"
     
     try:
