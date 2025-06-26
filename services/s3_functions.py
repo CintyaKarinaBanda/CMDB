@@ -14,8 +14,10 @@ def get_bucket_changed_by(bucket_name, field_name):
     finally: conn.close()
 
 def get_bucket_size(bucket_name, cw_client):
-    print('hi')
-    if not cw_client: return "N/A-o"
+    print(f"DEBUG: get_bucket_size llamada para {bucket_name}")
+    if not cw_client: 
+        print(f"DEBUG: No hay cliente CloudWatch para {bucket_name}")
+        return "N/A"
     
     try:
         end_time = datetime.utcnow()
@@ -109,7 +111,9 @@ def extract_bucket_data(bucket, s3_client, account_name, account_id, region, cw_
         except ClientError:
             backup_recovery = "Disabled"
         
+        print(f"DEBUG: Obteniendo capacity para {bucket_name}")
         capacity = get_bucket_size(bucket_name, cw_client)
+        print(f"DEBUG: Capacity obtenida: {capacity}")
         
         return {
             "AccountName": account_name, "AccountID": account_id, "BucketName": bucket_name,
@@ -153,9 +157,16 @@ def get_s3_buckets(region, credentials, account_id, account_name):
         buckets_info = []
         
         for bucket in response.get('Buckets', []):
-            if bucket['Name'] not in existing_buckets:
+            bucket_name = bucket['Name']
+            print(f"DEBUG: Procesando bucket {bucket_name}")
+            if bucket_name not in existing_buckets:
+                print(f"DEBUG: Bucket {bucket_name} es nuevo, extrayendo datos")
                 info = extract_bucket_data(bucket, s3_client, account_name, account_id, region, cw_client)
-                if info: buckets_info.append(info)
+                if info: 
+                    print(f"DEBUG: Datos extraídos para {bucket_name}: {info.get('Capacity', 'N/A')}")
+                    buckets_info.append(info)
+            else:
+                print(f"DEBUG: Bucket {bucket_name} ya existe en BD")
         
         if buckets_info:
             print(f"INFO: S3 {region}: {len(buckets_info)} buckets nuevos encontrados")
@@ -202,6 +213,11 @@ def insert_or_update_s3_data(s3_data):
         
         conn.commit()
         return {"processed": len(s3_data), "inserted": inserted, "updated": updated}
+    except Exception as e:
+        conn.rollback()
+        return {"error": str(e)}
+    finally:
+        conn.close()ta), "inserted": inserted, "updated": updated}
     except Exception as e:
         conn.rollback()
         return {"error": str(e)}
