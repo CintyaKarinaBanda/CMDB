@@ -39,6 +39,7 @@ def get_bucket_size(bucket_name, cw_client):
                 )
                 
                 datapoints = response.get('Datapoints', [])
+                print(f"Storage type: {datapoints}, {response}")
                 if datapoints:
                     latest = max(datapoints, key=lambda x: x['Timestamp'])
                     print(f"Datapoints for {bucket_name} ({storage_type}):")
