@@ -217,9 +217,4 @@ def insert_or_update_s3_data(s3_data):
         conn.rollback()
         return {"error": str(e)}
     finally:
-        conn.close()ta), "inserted": inserted, "updated": updated}
-    except Exception as e:
-        conn.rollback()
-        return {"error": str(e)}
-    finally:
         conn.close()
