@@ -164,17 +164,16 @@ def get_s3_buckets(region, credentials, account_id, account_name):
         for bucket in response.get('Buckets', []):
             bucket_name = bucket['Name']
             print(f"DEBUG: Procesando bucket {bucket_name}")
-            if bucket_name not in existing_buckets:
-                print(f"DEBUG: Bucket {bucket_name} es nuevo, extrayendo datos")
-                info = extract_bucket_data(bucket, s3_client, account_name, account_id, region, cw_client)
-                if info: 
-                    print(f"DEBUG: Datos extraídos para {bucket_name}: {info.get('Capacity', 'N/A')}")
-                    buckets_info.append(info)
-            else:
-                print(f"DEBUG: Bucket {bucket_name} ya existe en BD")
+            
+            # Procesar tanto buckets nuevos como existentes para actualizar capacity
+            print(f"DEBUG: Extrayendo datos para {bucket_name}")
+            info = extract_bucket_data(bucket, s3_client, account_name, account_id, region, cw_client)
+            if info: 
+                print(f"DEBUG: Datos extraídos para {bucket_name}: {info.get('Capacity', 'N/A')}")
+                buckets_info.append(info)
         
         if buckets_info:
-            print(f"INFO: S3 {region}: {len(buckets_info)} buckets nuevos encontrados")
+            print(f"INFO: S3 {region}: {len(buckets_info)} buckets procesados")
         return buckets_info
     except Exception as e:
         print(f"ERROR: get_s3_buckets {account_name}: {e}")
