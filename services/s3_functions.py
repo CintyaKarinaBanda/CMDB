@@ -14,10 +14,13 @@ def get_bucket_changed_by(bucket_name, field_name):
     except: return "unknown"
     finally: conn.close()
 
-def get_bucket_size(cw_client, bucket_name):
+def get_bucket_size(bucket_name, bucket_region, credentials):
     try:
+        cw_client = create_aws_client("cloudwatch", bucket_region, credentials)
+        if not cw_client: return "N/A"
+        
         end_time = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-        start_time = end_time - timedelta(days=5)
+        start_time = end_time - timedelta(days=2)
         
         response = cw_client.get_metric_statistics(
             Namespace='AWS/S3',
@@ -38,7 +41,6 @@ def get_bucket_size(cw_client, bucket_name):
             total_bytes = int(latest.get('Maximum', 0))
             
             if total_bytes == 0: return "0 B"
-            
             if total_bytes >= 1024**3: return f"{total_bytes / (1024**3):.2f} GB"
             elif total_bytes >= 1024**2: return f"{total_bytes / (1024**2):.2f} MB"
             elif total_bytes >= 1024: return f"{total_bytes / 1024:.2f} KB"
@@ -46,10 +48,10 @@ def get_bucket_size(cw_client, bucket_name):
         
         return "0 B"
     except Exception as e:
-        print(f"Error en get_bucket_size para {bucket_name}: {e}")
-        return "0 B"
+        print(f"Error bucket size {bucket_name} en {bucket_region}: {e}")
+        return "N/A"
 
-def extract_bucket_data(bucket, s3_client, account_name, account_id, region, cw_client):
+def extract_bucket_data(bucket, s3_client, account_name, account_id, region, credentials):
     bucket_name = bucket['Name']
     try:
         try:
@@ -97,8 +99,7 @@ def extract_bucket_data(bucket, s3_client, account_name, account_id, region, cw_
         except ClientError:
             backup_recovery = "Disabled"
         
-        raw_capacity = get_bucket_size(cw_client, bucket_name)
-        capacity = raw_capacity if raw_capacity else "N/A"
+        capacity = get_bucket_size(bucket_name, bucket_region, credentials)
         
         return {
             "AccountName": account_name, "AccountID": account_id, "BucketName": bucket_name,
@@ -114,7 +115,6 @@ def extract_bucket_data(bucket, s3_client, account_name, account_id, region, cw_
 
 def get_s3_buckets(region, credentials, account_id, account_name):
     s3_client = create_aws_client("s3", region, credentials)
-    cw_client = create_aws_client("cloudwatch", region, credentials)
     if not s3_client: return []
 
     try:
@@ -131,7 +131,7 @@ def get_s3_buckets(region, credentials, account_id, account_name):
         
         for bucket in response.get('Buckets', []):
             if bucket['Name'] not in existing_buckets:
-                info = extract_bucket_data(bucket, s3_client, account_name, account_id, region, cw_client)
+                info = extract_bucket_data(bucket, s3_client, account_name, account_id, region, credentials)
                 if info: buckets_info.append(info)
         
         if buckets_info:
