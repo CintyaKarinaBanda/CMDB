@@ -14,9 +14,14 @@ def get_bucket_changed_by(bucket_name, field_name):
     except: return "unknown"
     finally: conn.close()
 
-def get_bucket_size(s3_client, bucket_name):
+def get_bucket_size(credentials, bucket_name):
     try:
-        cw = boto3.client('cloudwatch', region_name='us-east-1')
+        session = boto3.Session(
+            aws_access_key_id=credentials['AccessKeyId'],
+            aws_secret_access_key=credentials['SecretAccessKey'],
+            aws_session_token=credentials['SessionToken']
+        )
+        cw = session.client('cloudwatch', region_name='us-east-1')
         
         end_time = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
         start_time = end_time - timedelta(days=5)
@@ -51,7 +56,7 @@ def get_bucket_size(s3_client, bucket_name):
         print(f"Error en get_bucket_size para {bucket_name}: {e}")
         return "0 B"
 
-def extract_bucket_data(bucket, s3_client, account_name, account_id, region):
+def extract_bucket_data(bucket, s3_client, account_name, account_id, region, credentials=None):
     bucket_name = bucket['Name']
     try:
         try:
@@ -99,8 +104,8 @@ def extract_bucket_data(bucket, s3_client, account_name, account_id, region):
         except ClientError:
             backup_recovery = "Disabled"
         
-        raw_capacity = get_bucket_size(s3_client, bucket_name)
-        capacity = raw_capacity if raw_capacity else "N/A"
+        raw_capacity = get_bucket_size(credentials, bucket_name) if credentials else "N/A"
+        capacity = raw_capacity
         
         return {
             "AccountName": account_name, "AccountID": account_id, "BucketName": bucket_name,
@@ -132,7 +137,7 @@ def get_s3_buckets(region, credentials, account_id, account_name):
         
         for bucket in response.get('Buckets', []):
             if bucket['Name'] not in existing_buckets:
-                info = extract_bucket_data(bucket, s3_client, account_name, account_id, region)
+                info = extract_bucket_data(bucket, s3_client, account_name, account_id, region, credentials)
                 if info: buckets_info.append(info)
         
         if buckets_info:
