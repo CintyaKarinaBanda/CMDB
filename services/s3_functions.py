@@ -1,7 +1,6 @@
 from botocore.exceptions import ClientError
 from datetime import datetime, timedelta
 from services.utils import create_aws_client, get_db_connection
-import boto3
 
 def get_bucket_changed_by(bucket_name, field_name):
     conn = get_db_connection()
@@ -123,6 +122,7 @@ def extract_bucket_data(bucket, s3_client, account_name, account_id, region, cw_
         return None
 
 def get_s3_buckets(region, credentials, account_id, account_name):
+    print(f"INFO: get_s3_buckets {account_name} {region}")
     s3_client = create_aws_client("s3", region, credentials)
     if not s3_client: return []
     
