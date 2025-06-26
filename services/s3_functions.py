@@ -14,14 +14,12 @@ def get_bucket_changed_by(bucket_name, field_name):
     except: return "unknown"
     finally: conn.close()
 
-def get_bucket_size(s3_client, bucket_name):
+def get_bucket_size(cw_client, bucket_name):
     try:
-        cw = boto3.client('cloudwatch', region_name='us-east-1')
-        
         end_time = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
         start_time = end_time - timedelta(days=5)
         
-        response = cw.get_metric_statistics(
+        response = cw_client.get_metric_statistics(
             Namespace='AWS/S3',
             MetricName='BucketSizeBytes',
             Dimensions=[
@@ -51,7 +49,7 @@ def get_bucket_size(s3_client, bucket_name):
         print(f"Error en get_bucket_size para {bucket_name}: {e}")
         return "0 B"
 
-def extract_bucket_data(bucket, s3_client, account_name, account_id, region):
+def extract_bucket_data(bucket, s3_client, account_name, account_id, region, cw_client):
     bucket_name = bucket['Name']
     try:
         try:
@@ -99,7 +97,7 @@ def extract_bucket_data(bucket, s3_client, account_name, account_id, region):
         except ClientError:
             backup_recovery = "Disabled"
         
-        raw_capacity = get_bucket_size(s3_client, bucket_name)
+        raw_capacity = get_bucket_size(cw_client, bucket_name)
         capacity = raw_capacity if raw_capacity else "N/A"
         
         return {
@@ -116,6 +114,7 @@ def extract_bucket_data(bucket, s3_client, account_name, account_id, region):
 
 def get_s3_buckets(region, credentials, account_id, account_name):
     s3_client = create_aws_client("s3", region, credentials)
+    cw_client = create_aws_client("cloudwatch", region, credentials)
     if not s3_client: return []
 
     try:
@@ -132,7 +131,7 @@ def get_s3_buckets(region, credentials, account_id, account_name):
         
         for bucket in response.get('Buckets', []):
             if bucket['Name'] not in existing_buckets:
-                info = extract_bucket_data(bucket, s3_client, account_name, account_id, region)
+                info = extract_bucket_data(bucket, s3_client, account_name, account_id, region, cw_client)
                 if info: buckets_info.append(info)
         
         if buckets_info:
