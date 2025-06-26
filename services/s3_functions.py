@@ -16,9 +16,7 @@ def get_bucket_changed_by(bucket_name, field_name):
 
 def get_bucket_size(s3_client, bucket_name):
     try:
-        # Usar las mismas credenciales del s3_client para CloudWatch
-        session = s3_client._client_config.session or boto3.Session()
-        cw = session.client('cloudwatch', region_name='us-east-1')
+        cw = boto3.client('cloudwatch', region_name='us-east-1')
         
         end_time = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
         start_time = end_time - timedelta(days=5)
