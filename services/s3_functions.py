@@ -14,44 +14,51 @@ def get_bucket_changed_by(bucket_name, field_name):
     except: return "unknown"
     finally: conn.close()
 
-def get_bucket_size(bucket_name, bucket_region, credentials):
+def get_bucket_size(bucket_name, cw_client):
+    if not cw_client: return "N/A-o"
+    
     try:
-        cw_client = create_aws_client("cloudwatch", bucket_region, credentials)
-        if not cw_client: return "N/A"
+        end_time = datetime.utcnow()
+        start_time = end_time - timedelta(days=7)
         
-        end_time = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-        start_time = end_time - timedelta(days=2)
+        storage_types = ['StandardStorage', 'StandardIAStorage', 'ReducedRedundancyStorage', 'GlacierStorage']
+        total_bytes = 0
         
-        response = cw_client.get_metric_statistics(
-            Namespace='AWS/S3',
-            MetricName='BucketSizeBytes',
-            Dimensions=[
-                {'Name': 'BucketName', 'Value': bucket_name},
-                {'Name': 'StorageType', 'Value': 'StandardStorage'}
-            ],
-            StartTime=start_time,
-            EndTime=end_time,
-            Period=86400,
-            Statistics=['Maximum']
-        )
+        for storage_type in storage_types:
+            try:
+                response = cw_client.get_metric_statistics(
+                    Namespace='AWS/S3',
+                    MetricName='BucketSizeBytes',
+                    Dimensions=[
+                        {'Name': 'BucketName', 'Value': bucket_name},
+                        {'Name': 'StorageType', 'Value': storage_type}
+                    ],
+                    StartTime=start_time,
+                    EndTime=end_time,
+                    Period=86400,
+                    Statistics=['Maximum']
+                )
+                
+                datapoints = response.get('Datapoints', [])
+                if datapoints:
+                    latest = max(datapoints, key=lambda x: x['Timestamp'])
+                    total_bytes += int(latest.get('Maximum', 0))
+            except Exception as e:
+                print(f"Error storage {storage_type} para {bucket_name}: {e}")
+                continue
         
-        datapoints = response.get('Datapoints', [])
-        if datapoints:
-            latest = max(datapoints, key=lambda x: x['Timestamp'])
-            total_bytes = int(latest.get('Maximum', 0))
-            
-            if total_bytes == 0: return "0 B"
-            if total_bytes >= 1024**3: return f"{total_bytes / (1024**3):.2f} GB"
-            elif total_bytes >= 1024**2: return f"{total_bytes / (1024**2):.2f} MB"
-            elif total_bytes >= 1024: return f"{total_bytes / 1024:.2f} KB"
-            else: return f"{total_bytes} B"
+        if total_bytes == 0: return "0 B"
+        if total_bytes >= 1024**4: return f"{total_bytes / (1024**4):.2f} TB"
+        elif total_bytes >= 1024**3: return f"{total_bytes / (1024**3):.2f} GB"
+        elif total_bytes >= 1024**2: return f"{total_bytes / (1024**2):.2f} MB"
+        elif total_bytes >= 1024: return f"{total_bytes / 1024:.2f} KB"
+        else: return f"{total_bytes} B"
         
-        return "0 B"
     except Exception as e:
-        print(f"Error bucket size {bucket_name} en {bucket_region}: {e}")
+        print(f"Error bucket size {bucket_name}: {e}")
         return "N/A"
 
-def extract_bucket_data(bucket, s3_client, account_name, account_id, region, credentials):
+def extract_bucket_data(bucket, s3_client, account_name, account_id, region, cw_client):
     bucket_name = bucket['Name']
     try:
         try:
@@ -99,7 +106,7 @@ def extract_bucket_data(bucket, s3_client, account_name, account_id, region, cre
         except ClientError:
             backup_recovery = "Disabled"
         
-        capacity = get_bucket_size(bucket_name, bucket_region, credentials)
+        capacity = get_bucket_size(bucket_name, cw_client)
         
         return {
             "AccountName": account_name, "AccountID": account_id, "BucketName": bucket_name,
@@ -116,8 +123,20 @@ def extract_bucket_data(bucket, s3_client, account_name, account_id, region, cre
 def get_s3_buckets(region, credentials, account_id, account_name):
     s3_client = create_aws_client("s3", region, credentials)
     if not s3_client: return []
+    
+    # Crear cliente CloudWatch una sola vez para todas las métricas
+    cw_client = create_aws_client("cloudwatch", "us-east-1", credentials)
+    if not cw_client:
+        print(f"WARN: No se pudo crear cliente CloudWatch para {account_name}")
 
     try:
+        # Validar credenciales con una llamada simple
+        try:
+            s3_client.list_buckets()
+        except Exception as e:
+            print(f"ERROR: Credenciales inválidas para {account_name}: {e}")
+            return []
+        
         conn = get_db_connection()
         existing_buckets = set()
         if conn:
@@ -131,13 +150,15 @@ def get_s3_buckets(region, credentials, account_id, account_name):
         
         for bucket in response.get('Buckets', []):
             if bucket['Name'] not in existing_buckets:
-                info = extract_bucket_data(bucket, s3_client, account_name, account_id, region, credentials)
+                info = extract_bucket_data(bucket, s3_client, account_name, account_id, region, cw_client)
                 if info: buckets_info.append(info)
         
         if buckets_info:
             print(f"INFO: S3 {region}: {len(buckets_info)} buckets nuevos encontrados")
         return buckets_info
-    except: return []
+    except Exception as e:
+        print(f"ERROR: get_s3_buckets {account_name}: {e}")
+        return []
 
 def insert_or_update_s3_data(s3_data):
     if not s3_data: return {"processed": 0, "inserted": 0, "updated": 0}
@@ -170,11 +191,10 @@ def insert_or_update_s3_data(s3_data):
                 ))
                 inserted += 1
             else:
-                # Solo actualizar si capacity no es N/A
-                if bucket["Capacity"] != "N/A":
-                    cursor.execute("UPDATE s3 SET capacity = %s, last_updated = CURRENT_TIMESTAMP WHERE bucket_name = %s", 
-                                 (bucket["Capacity"], bucket_name))
-                    updated += 1
+                # Actualizar capacity siempre, incluso si es N/A
+                cursor.execute("UPDATE s3 SET capacity = %s, last_updated = CURRENT_TIMESTAMP WHERE bucket_name = %s", 
+                             (bucket["Capacity"], bucket_name))
+                updated += 1
         
         conn.commit()
         return {"processed": len(s3_data), "inserted": inserted, "updated": updated}
