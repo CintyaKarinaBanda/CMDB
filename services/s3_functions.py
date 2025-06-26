@@ -27,6 +27,7 @@ def get_bucket_size(bucket_name, cw_client):
         total_bytes = 0
         
         for storage_type in storage_types:
+            print(f"DEBUG: Consultando {storage_type} para {bucket_name}")
             try:
                 response = cw_client.get_metric_statistics(
                     Namespace='AWS/S3',
@@ -41,18 +42,22 @@ def get_bucket_size(bucket_name, cw_client):
                     Statistics=['Maximum']
                 )
                 
+                print(f"DEBUG: Respuesta CloudWatch OK para {storage_type}")
                 datapoints = response.get('Datapoints', [])
-                print(f"Storage type: {datapoints}, {response}")
+                print(f"DEBUG: {len(datapoints)} datapoints para {bucket_name} ({storage_type})")
+                
                 if datapoints:
                     latest = max(datapoints, key=lambda x: x['Timestamp'])
-                    print(f"Datapoints for {bucket_name} ({storage_type}):")
-                    print(latest)
-                    total_bytes += int(latest.get('Maximum', 0))
+                    bytes_found = int(latest.get('Maximum', 0))
+                    print(f"DEBUG: {bytes_found} bytes en {storage_type}")
+                    total_bytes += bytes_found
+                    
             except Exception as e:
-                print(f"Error storage {storage_type} para {bucket_name}: {e}")
+                print(f"ERROR: {storage_type} para {bucket_name}: {e}")
                 continue
         
-        if total_bytes == 0: return "0-0 B"
+        print(f"DEBUG: Total bytes para {bucket_name}: {total_bytes}")
+        if total_bytes == 0: return "0 B"
         if total_bytes >= 1024**4: return f"{total_bytes / (1024**4):.2f} TB"
         elif total_bytes >= 1024**3: return f"{total_bytes / (1024**3):.2f} GB"
         elif total_bytes >= 1024**2: return f"{total_bytes / (1024**2):.2f} MB"
