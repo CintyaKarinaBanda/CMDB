@@ -19,10 +19,12 @@ IMPORTANT_EVENTS = {
     "RestoreFromClusterSnapshot", "CreateClusterSnapshot", "DeleteClusterSnapshot",
     "CreateBucket", "DeleteBucket", "PutBucketTagging", "PutBucketEncryption",
     "PutBucketVersioning", "PutBucketNotification", "PutPublicAccessBlock",
-    "PutBucketReplication", "DeleteBucketReplication", "PutBucketAcl", "PutBucketPolicy"
+    "PutBucketReplication", "DeleteBucketReplication", "PutBucketAcl", "PutBucketPolicy",
+    "UpdateClusterConfig", "UpdateClusterVersion", "CreateAddon", "DeleteAddon", "UpdateAddon",
+    "TagResource", "UntagResource"
 }
 
-EVENT_SOURCES = ["ec2.amazonaws.com", "rds.amazonaws.com", "redshift.amazonaws.com", "s3.amazonaws.com"]
+EVENT_SOURCES = ["ec2.amazonaws.com", "rds.amazonaws.com", "redshift.amazonaws.com", "s3.amazonaws.com", "eks.amazonaws.com"]
 
 def extract_resource_name(event_detail):
     """Extrae resource_name siguiendo el patrón exacto de AWS CloudTrail Console."""
@@ -74,6 +76,13 @@ def extract_resource_name(event_detail):
             if field in req and req[field]:
                 return req[field]
     
+    # EKS Events
+    elif event_source == "eks.amazonaws.com":
+        eks_fields = ["name", "clusterName"]
+        for field in eks_fields:
+            if field in req and req[field]:
+                return req[field]
+    
     # Prioridad 3: responseElements para recursos recién creados
     if event_name == "RunInstances" and "instances" in resp:
         instances = resp["instances"]
@@ -82,7 +91,7 @@ def extract_resource_name(event_detail):
     
     # Campos comunes en responseElements
     response_fields = ["instanceId", "dBInstanceIdentifier", "clusterIdentifier", 
-                      "vpcId", "subnetId", "volumeId", "groupId", "bucketName"]
+                      "vpcId", "subnetId", "volumeId", "groupId", "bucketName", "name"]
     for field in response_fields:
         if field in resp and resp[field]:
             return resp[field]
@@ -124,6 +133,9 @@ def is_valid_resource(resource_name, event_source):
     # S3
     if event_source == "s3.amazonaws.com":
         return True
+    # EKS
+    if event_source == "eks.amazonaws.com":
+        return True
     
     return False
 
@@ -132,6 +144,7 @@ def extract_changes(event_detail):
     req = event_detail.get("requestParameters", {})
     resp = event_detail.get("responseElements", {})
     event_name = event_detail.get("eventName", "")
+    event_source = event_detail.get("eventSource", "")
     
     changes = {}
     
@@ -198,7 +211,7 @@ def extract_changes(event_detail):
         changes["vpc_id"] = req.get("vpcId")
     
     # Redshift
-    elif event_name == "CreateCluster":
+    elif event_name == "CreateCluster" and event_source == "redshift.amazonaws.com":
         changes["node_type"] = req.get("nodeType")
         changes["number_of_nodes"] = req.get("numberOfNodes")
     
@@ -227,6 +240,38 @@ def extract_changes(event_detail):
     elif event_name in ["PutBucketEncryption", "PutBucketVersioning", "PutBucketNotification", "PutPublicAccessBlock", "PutBucketReplication", "PutBucketAcl", "PutBucketPolicy"]:
         changes["configuration"] = event_name.replace("PutBucket", "").lower()
         changes["bucket_name"] = req.get("bucketName")
+    
+    # EKS Events
+    elif event_name == "CreateCluster" and event_source == "eks.amazonaws.com":
+        changes["cluster_name"] = req.get("name")
+        changes["kubernetes_version"] = req.get("version")
+        changes["role_arn"] = req.get("roleArn")
+    
+    elif event_name == "DeleteCluster" and event_source == "eks.amazonaws.com":
+        changes["cluster_name"] = req.get("name")
+        changes["action"] = "delete"
+    
+    elif event_name == "UpdateClusterConfig":
+        changes["cluster_name"] = req.get("name")
+        changes["configuration"] = "cluster_config"
+    
+    elif event_name == "UpdateClusterVersion":
+        changes["cluster_name"] = req.get("name")
+        changes["new_version"] = req.get("version")
+    
+    elif event_name in ["CreateAddon", "DeleteAddon", "UpdateAddon"]:
+        changes["cluster_name"] = req.get("clusterName")
+        changes["addon_name"] = req.get("addonName")
+        changes["action"] = event_name.replace("Addon", "").lower()
+    
+    elif event_name in ["TagResource", "UntagResource"] and event_source == "eks.amazonaws.com":
+        changes["resource_arn"] = req.get("resourceArn")
+        if "tags" in req:
+            tags = []
+            for key, value in req["tags"].items():
+                tags.append(f"{key}={value}")
+            if tags:
+                changes["tags"] = ", ".join(tags)
     
     # Fallback: capturar campos importantes genéricos
     if not changes:
@@ -330,7 +375,8 @@ def insert_or_update_cloudtrail_events(events_data):
                 "ec2.amazonaws.com": "EC2",
                 "rds.amazonaws.com": "RDS", 
                 "redshift.amazonaws.com": "Redshift",
-                "s3.amazonaws.com": "S3"
+                "s3.amazonaws.com": "S3",
+                "eks.amazonaws.com": "EKS"
             }.get(event["event_source"], "Unknown")
 
             batch_data.append((

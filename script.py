@@ -13,7 +13,8 @@ from services import (
     get_vpc_details, insert_or_update_vpc_data,
     get_subnets_details, insert_or_update_subnet_data,
     get_all_cloudtrail_events, insert_or_update_cloudtrail_events,
-    get_s3_buckets, insert_or_update_s3_data
+    get_s3_buckets, insert_or_update_s3_data,
+    get_eks_clusters, insert_or_update_eks_data
 )
 
 def assume_role(role_arn):
@@ -44,7 +45,8 @@ def process_account_region(account_id, role_name, account_name, region, services
         "vpc": lambda: get_vpc_details(region, creds, account_id, account_name),
         "subnets": lambda: get_subnets_details(region, creds, account_id, account_name),
         "cloudtrail": lambda: get_all_cloudtrail_events(region, creds, account_id, account_name).get("events", []),
-        "s3": lambda: get_s3_buckets(region, creds, account_id, account_name)
+        "s3": lambda: get_s3_buckets(region, creds, account_id, account_name),
+        "eks": lambda: get_eks_clusters(region, creds, account_id, account_name)
     }
 
     result = {"account_id": account_id, "region": region, "credentials": creds}
@@ -100,7 +102,8 @@ def main(services):
         "vpc": insert_or_update_vpc_data,
         "subnets": insert_or_update_subnet_data,
         "cloudtrail": insert_or_update_cloudtrail_events,
-        "s3": insert_or_update_s3_data
+        "s3": insert_or_update_s3_data,
+        "eks": insert_or_update_eks_data
     }
 
     print("\n=== Insertando datos en la base de datos ===")
@@ -134,6 +137,6 @@ def main(services):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Recolecta información de recursos AWS')
     parser.add_argument('--services', nargs='+', default=["ec2", "cloudtrail"],
-                      choices=["ec2", "rds", "redshift", "vpc", "subnets", "cloudtrail", "s3"],
+                      choices=["ec2", "rds", "redshift", "vpc", "subnets", "cloudtrail", "s3", "eks"],
                       help='Servicios a consultar')
     main(parser.parse_args().services)

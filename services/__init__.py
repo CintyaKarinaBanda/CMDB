@@ -5,3 +5,4 @@ from services.redshift_functions import get_redshift_clusters, insert_or_update_
 from services.vpc_functions import get_vpc_details, insert_or_update_vpc_data
 from services.subnets_functions import get_subnets_details, insert_or_update_subnet_data
 from services.s3_functions import get_s3_buckets, insert_or_update_s3_data
+from services.eks_functions import get_eks_clusters, insert_or_update_eks_data
