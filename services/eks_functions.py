@@ -10,7 +10,7 @@ FIELD_EVENT_MAP = {
     "clustersecuritygroup": ["UpdateClusterConfig"],
     "supportperiod": ["UpdateClusterConfig"],
     "addons": ["CreateAddon", "DeleteAddon", "UpdateAddon"],
-    "tags": ["TagResource", "UntagResource"]
+    "tags": ["TagResource", "UntagResource"],
 }
 
 def get_cluster_changed_by(cluster_name, field_name):
@@ -56,10 +56,30 @@ def get_cluster_addons(eks_client, cluster_name):
     except ClientError:
         return []
 
+def get_support_period_message(version, support_type):
+    """Genera el mensaje completo de soporte como aparece en la consola"""
+    if not version:
+        return "Standard support"
+    
+    version_end_dates = {
+        "1.31": "November 25, 2025",
+        "1.30": "July 25, 2025", 
+        "1.29": "March 25, 2025",
+        "1.28": "November 25, 2024",
+        "1.27": "July 25, 2024"
+    }
+    
+    support_name = "Standard support" if support_type == "STANDARD" else "Extended support"
+    end_date = version_end_dates.get(version, "TBD")
+    
+    if end_date != "TBD":
+        return f"{support_name} - Your cluster's Kubernetes version ({version}) will reach the end of standard support on {end_date}. On that date, your cluster will enter the extended support period with additional fees."
+    else:
+        return f"{support_name} - Kubernetes version {version}"
+
 def extract_eks_data(cluster, eks_client, account_name, account_id, region):
     cluster_name = cluster["name"]
     tags = cluster.get("tags", {})
-    get_tag = lambda key: tags.get(key, "N/A")
     
     addons = get_cluster_addons(eks_client, cluster_name)
     
@@ -72,7 +92,7 @@ def extract_eks_data(cluster, eks_client, account_name, account_id, region):
         "KubernetesVersion": cluster.get("version", "N/A"),
         "Provider": "AWS",
         "ClusterSecurityGroup": cluster.get("resourcesVpcConfig", {}).get("clusterSecurityGroupId", "N/A"),
-        "SupportPeriod": "N/A",
+        "SupportPeriod": get_support_period_message(cluster.get("version", ""), cluster.get("supportType", "STANDARD")),
         "Addons": addons,
         "Tags": dict(tags) if tags else {}
     }
@@ -118,7 +138,7 @@ def insert_or_update_eks_data(eks_data):
             KubernetesVersion, Provider, ClusterSecurityGroup, SupportPeriod,
             Addons, Tags, last_updated
         ) VALUES (
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
         )
     """
 

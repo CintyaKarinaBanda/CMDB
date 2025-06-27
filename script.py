@@ -14,7 +14,8 @@ from services import (
     get_subnets_details, insert_or_update_subnet_data,
     get_all_cloudtrail_events, insert_or_update_cloudtrail_events,
     get_s3_buckets, insert_or_update_s3_data,
-    get_eks_clusters, insert_or_update_eks_data
+    get_eks_clusters, insert_or_update_eks_data,
+    get_ecr_repositories, insert_or_update_ecr_data
 )
 
 def assume_role(role_arn):
@@ -46,7 +47,8 @@ def process_account_region(account_id, role_name, account_name, region, services
         "subnets": lambda: get_subnets_details(region, creds, account_id, account_name),
         "cloudtrail": lambda: get_all_cloudtrail_events(region, creds, account_id, account_name).get("events", []),
         "s3": lambda: get_s3_buckets(region, creds, account_id, account_name),
-        "eks": lambda: get_eks_clusters(region, creds, account_id, account_name)
+        "eks": lambda: get_eks_clusters(region, creds, account_id, account_name),
+        "ecr": lambda: get_ecr_repositories(region, creds, account_id, account_name)
     }
 
     result = {"account_id": account_id, "region": region, "credentials": creds}
@@ -103,7 +105,8 @@ def main(services):
         "subnets": insert_or_update_subnet_data,
         "cloudtrail": insert_or_update_cloudtrail_events,
         "s3": insert_or_update_s3_data,
-        "eks": insert_or_update_eks_data
+        "eks": insert_or_update_eks_data,
+        "ecr": insert_or_update_ecr_data
     }
 
     print("\n=== Insertando datos en la base de datos ===")
@@ -137,6 +140,6 @@ def main(services):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Recolecta información de recursos AWS')
     parser.add_argument('--services', nargs='+', default=["ec2", "cloudtrail"],
-                      choices=["ec2", "rds", "redshift", "vpc", "subnets", "cloudtrail", "s3", "eks"],
+                      choices=["ec2", "rds", "redshift", "vpc", "subnets", "cloudtrail", "s3", "eks", "ecr"],
                       help='Servicios a consultar')
     main(parser.parse_args().services)
