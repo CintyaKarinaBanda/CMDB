@@ -68,7 +68,11 @@ def get_kms_keys(region, credentials, account_id, account_name):
         for page in kms_client.get_paginator('list_keys').paginate():
             for key in page.get("Keys", []):
                 try:
-                    keys_info.append(extract_kms_data(key, kms_client, account_name, account_id, region))
+                    # Get key details to filter
+                    key_detail = kms_client.describe_key(KeyId=key["KeyId"])["KeyMetadata"]
+                    # Only include customer managed keys (like console shows)
+                    if key_detail.get("KeyManager") == "CUSTOMER":
+                        keys_info.append(extract_kms_data(key, kms_client, account_name, account_id, region))
                 except:
                     continue
         return keys_info
