@@ -11,10 +11,11 @@ IMPORTANT_EVENTS = {
     "CreateBucket", "DeleteBucket", "PutBucketTagging", "PutBucketEncryption", "PutBucketVersioning", "PutBucketPolicy",
     "UpdateClusterConfig", "UpdateClusterVersion", "CreateAddon", "DeleteAddon", "UpdateAddon", "TagResource", "UntagResource",
     "CreateRepository", "DeleteRepository", "PutImage", "BatchDeleteImage", "PutRepositoryPolicy", "DeleteRepositoryPolicy",
-    "CreateKey", "ScheduleKeyDeletion", "CancelKeyDeletion", "EnableKey", "DisableKey", "UpdateKeyDescription", "PutKeyPolicy", "CreateAlias", "DeleteAlias"
+    "CreateKey", "ScheduleKeyDeletion", "CancelKeyDeletion", "EnableKey", "DisableKey", "UpdateKeyDescription", "PutKeyPolicy", "CreateAlias", "DeleteAlias",
+    "CreateFunction", "DeleteFunction", "UpdateFunctionCode", "UpdateFunctionConfiguration", "PublishVersion", "CreateEventSourceMapping", "DeleteEventSourceMapping"
 }
 
-EVENT_SOURCES = ["ec2.amazonaws.com", "rds.amazonaws.com", "redshift.amazonaws.com", "s3.amazonaws.com", "eks.amazonaws.com", "ecr.amazonaws.com", "kms.amazonaws.com"]
+EVENT_SOURCES = ["ec2.amazonaws.com", "rds.amazonaws.com", "redshift.amazonaws.com", "s3.amazonaws.com", "eks.amazonaws.com", "ecr.amazonaws.com", "kms.amazonaws.com", "lambda.amazonaws.com"]
 SERVICE_FIELDS = {
     "ec2.amazonaws.com": ["instanceId", "volumeId", "vpcId", "subnetId", "groupId"],
     "rds.amazonaws.com": ["dBInstanceIdentifier", "dBClusterIdentifier"],
@@ -22,10 +23,11 @@ SERVICE_FIELDS = {
     "s3.amazonaws.com": ["bucketName", "bucket"],
     "eks.amazonaws.com": ["name", "clusterName"],
     "ecr.amazonaws.com": ["repositoryName"],
-    "kms.amazonaws.com": ["keyId"]
+    "kms.amazonaws.com": ["keyId"],
+    "lambda.amazonaws.com": ["functionName"]
 }
-RESPONSE_FIELDS = ["instanceId", "dBInstanceIdentifier", "clusterIdentifier", "vpcId", "subnetId", "bucketName", "name", "keyId"]
-RESOURCE_TYPES = {"ec2.amazonaws.com": "EC2", "rds.amazonaws.com": "RDS", "redshift.amazonaws.com": "Redshift", "s3.amazonaws.com": "S3", "eks.amazonaws.com": "EKS", "ecr.amazonaws.com": "ECR", "kms.amazonaws.com": "KMS"}
+RESPONSE_FIELDS = ["instanceId", "dBInstanceIdentifier", "clusterIdentifier", "vpcId", "subnetId", "bucketName", "name", "keyId", "functionName"]
+RESOURCE_TYPES = {"ec2.amazonaws.com": "EC2", "rds.amazonaws.com": "RDS", "redshift.amazonaws.com": "Redshift", "s3.amazonaws.com": "S3", "eks.amazonaws.com": "EKS", "ecr.amazonaws.com": "ECR", "kms.amazonaws.com": "KMS", "lambda.amazonaws.com": "LAMBDA"}
 
 def extract_resource_name(event_detail):
     req = event_detail.get("requestParameters", {})
@@ -93,6 +95,17 @@ def extract_changes(event_detail):
     elif event_name == "UpdateKeyDescription":
         changes["key_id"] = req.get("keyId")
         changes["description"] = req.get("description")
+    elif event_name in ["CreateFunction", "DeleteFunction"]:
+        changes["function_name"] = req.get("functionName")
+        changes["action"] = {"CreateFunction": "create", "DeleteFunction": "delete"}.get(event_name, "")
+        if event_name == "CreateFunction": changes.update({"runtime": req.get("runtime"), "handler": req.get("handler"), "memory": req.get("memorySize")})
+    elif event_name == "UpdateFunctionConfiguration":
+        changes["function_name"] = req.get("functionName")
+        for field in ["runtime", "handler", "memorySize", "timeout", "description"]: 
+            if req.get(field): changes[field] = req[field]
+    elif event_name == "UpdateFunctionCode":
+        changes["function_name"] = req.get("functionName")
+        changes["action"] = "update_code"
     elif event_name == "ModifyVpcAttribute":
         changes["vpc_id"] = req.get("vpcId")
         changes["attribute"] = req.get("attribute")

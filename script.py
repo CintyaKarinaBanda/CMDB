@@ -16,7 +16,8 @@ from services import (
     get_s3_buckets, insert_or_update_s3_data,
     get_eks_clusters, insert_or_update_eks_data,
     get_ecr_repositories, insert_or_update_ecr_data,
-    get_kms_keys, insert_or_update_kms_data
+    get_kms_keys, insert_or_update_kms_data,
+    get_lambda_functions, insert_or_update_lambda_data
 )
 
 def assume_role(role_arn):
@@ -50,7 +51,8 @@ def process_account_region(account_id, role_name, account_name, region, services
         "s3": lambda: get_s3_buckets(region, creds, account_id, account_name),
         "eks": lambda: get_eks_clusters(region, creds, account_id, account_name),
         "ecr": lambda: get_ecr_repositories(region, creds, account_id, account_name),
-        "kms": lambda: get_kms_keys(region, creds, account_id, account_name)
+        "kms": lambda: get_kms_keys(region, creds, account_id, account_name),
+        "lambda": lambda: get_lambda_functions(region, creds, account_id, account_name)
     }
 
     result = {"account_id": account_id, "region": region, "credentials": creds}
@@ -109,7 +111,8 @@ def main(services):
         "s3": insert_or_update_s3_data,
         "eks": insert_or_update_eks_data,
         "ecr": insert_or_update_ecr_data,
-        "kms": insert_or_update_kms_data
+        "kms": insert_or_update_kms_data,
+        "lambda": insert_or_update_lambda_data
     }
 
     print("\n=== Insertando datos en la base de datos ===")
@@ -143,6 +146,6 @@ def main(services):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Recolecta información de recursos AWS')
     parser.add_argument('--services', nargs='+', default=["ec2", "cloudtrail"],
-                      choices=["ec2", "rds", "redshift", "vpc", "subnets", "cloudtrail", "s3", "eks", "ecr", "kms"],
+                      choices=["ec2", "rds", "redshift", "vpc", "subnets", "cloudtrail", "s3", "eks", "ecr", "kms", "lambda"],
                       help='Servicios a consultar')
     main(parser.parse_args().services)
