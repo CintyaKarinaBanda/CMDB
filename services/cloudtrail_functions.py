@@ -10,20 +10,22 @@ IMPORTANT_EVENTS = {
     "CreateNatGateway", "DeleteNatGateway", "CreateCluster", "DeleteCluster", "ModifyCluster", "RebootCluster", "ResizeCluster", "PauseCluster", "ResumeCluster",
     "CreateBucket", "DeleteBucket", "PutBucketTagging", "PutBucketEncryption", "PutBucketVersioning", "PutBucketPolicy",
     "UpdateClusterConfig", "UpdateClusterVersion", "CreateAddon", "DeleteAddon", "UpdateAddon", "TagResource", "UntagResource",
-    "CreateRepository", "DeleteRepository", "PutImage", "BatchDeleteImage", "PutRepositoryPolicy", "DeleteRepositoryPolicy"
+    "CreateRepository", "DeleteRepository", "PutImage", "BatchDeleteImage", "PutRepositoryPolicy", "DeleteRepositoryPolicy",
+    "CreateKey", "ScheduleKeyDeletion", "CancelKeyDeletion", "EnableKey", "DisableKey", "UpdateKeyDescription", "PutKeyPolicy", "CreateAlias", "DeleteAlias"
 }
 
-EVENT_SOURCES = ["ec2.amazonaws.com", "rds.amazonaws.com", "redshift.amazonaws.com", "s3.amazonaws.com", "eks.amazonaws.com", "ecr.amazonaws.com"]
+EVENT_SOURCES = ["ec2.amazonaws.com", "rds.amazonaws.com", "redshift.amazonaws.com", "s3.amazonaws.com", "eks.amazonaws.com", "ecr.amazonaws.com", "kms.amazonaws.com"]
 SERVICE_FIELDS = {
     "ec2.amazonaws.com": ["instanceId", "volumeId", "vpcId", "subnetId", "groupId"],
     "rds.amazonaws.com": ["dBInstanceIdentifier", "dBClusterIdentifier"],
     "redshift.amazonaws.com": ["clusterIdentifier"],
     "s3.amazonaws.com": ["bucketName", "bucket"],
     "eks.amazonaws.com": ["name", "clusterName"],
-    "ecr.amazonaws.com": ["repositoryName"]
+    "ecr.amazonaws.com": ["repositoryName"],
+    "kms.amazonaws.com": ["keyId"]
 }
-RESPONSE_FIELDS = ["instanceId", "dBInstanceIdentifier", "clusterIdentifier", "vpcId", "subnetId", "bucketName", "name"]
-RESOURCE_TYPES = {"ec2.amazonaws.com": "EC2", "rds.amazonaws.com": "RDS", "redshift.amazonaws.com": "Redshift", "s3.amazonaws.com": "S3", "eks.amazonaws.com": "EKS", "ecr.amazonaws.com": "ECR"}
+RESPONSE_FIELDS = ["instanceId", "dBInstanceIdentifier", "clusterIdentifier", "vpcId", "subnetId", "bucketName", "name", "keyId"]
+RESOURCE_TYPES = {"ec2.amazonaws.com": "EC2", "rds.amazonaws.com": "RDS", "redshift.amazonaws.com": "Redshift", "s3.amazonaws.com": "S3", "eks.amazonaws.com": "EKS", "ecr.amazonaws.com": "ECR", "kms.amazonaws.com": "KMS"}
 
 def extract_resource_name(event_detail):
     req = event_detail.get("requestParameters", {})
@@ -85,6 +87,29 @@ def extract_changes(event_detail):
         changes["repository_name"] = req.get("repositoryName")
         changes["action"] = {"CreateRepository": "create", "DeleteRepository": "delete", "PutImage": "push"}.get(event_name, "")
         if event_name == "PutImage": changes["image_tag"] = req.get("imageTag")
+    elif event_name in ["CreateKey", "ScheduleKeyDeletion", "EnableKey", "DisableKey"]:
+        changes["key_id"] = req.get("keyId")
+        changes["action"] = {"CreateKey": "create", "ScheduleKeyDeletion": "schedule_delete", "EnableKey": "enable", "DisableKey": "disable"}.get(event_name, "")
+    elif event_name == "UpdateKeyDescription":
+        changes["key_id"] = req.get("keyId")
+        changes["description"] = req.get("description")
+    elif event_name == "ModifyVpcAttribute":
+        changes["vpc_id"] = req.get("vpcId")
+        changes["attribute"] = req.get("attribute")
+        if "value" in req: changes["new_value"] = str(req["value"])
+        if "enableDnsHostnames" in req: changes["dns_hostnames"] = req["enableDnsHostnames"]["value"]
+        if "enableDnsSupport" in req: changes["dns_support"] = req["enableDnsSupport"]["value"]
+    elif event_name == "AttachVolume":
+        changes["volume_id"] = req.get("volumeId")
+        changes["instance_id"] = req.get("instanceId")
+        changes["device"] = req.get("device")
+        changes["action"] = "attach"
+    elif event_name == "DetachVolume":
+        changes["volume_id"] = req.get("volumeId")
+        changes["instance_id"] = req.get("instanceId")
+        changes["device"] = req.get("device")
+        changes["force"] = req.get("force", False)
+        changes["action"] = "detach"
     
     return json.dumps(changes) if changes else None
 

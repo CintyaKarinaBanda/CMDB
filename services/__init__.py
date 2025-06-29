@@ -7,3 +7,4 @@ from services.subnets_functions import get_subnets_details, insert_or_update_sub
 from services.s3_functions import get_s3_buckets, insert_or_update_s3_data
 from services.eks_functions import get_eks_clusters, insert_or_update_eks_data
 from services.ecr_functions import get_ecr_repositories, insert_or_update_ecr_data
+from services.kms_functions import get_kms_keys, insert_or_update_kms_data
