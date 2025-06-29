@@ -33,29 +33,35 @@ def extract_kms_data(key, kms_client, account_name, account_id, region):
     # Get key details
     try:
         key_detail = kms_client.describe_key(KeyId=key_id)["KeyMetadata"]
-        key_name = key_detail.get("Description", "N/A")
-        key_usage = key_detail.get("KeyUsage", "N/A")
         key_state = key_detail.get("KeyState", "N/A")
+        key_spec = key_detail.get("KeySpec", "SYMMETRIC_DEFAULT")
+        key_type = "Simétrica" if key_spec == "SYMMETRIC_DEFAULT" else "Asimétrica"
     except:
-        key_name = key_usage = key_state = "N/A"
+        key_state = key_type = key_spec = "N/A"
+    
+    # Get aliases
+    try:
+        aliases_response = kms_client.list_aliases(KeyId=key_id)
+        aliases = [alias["AliasName"] for alias in aliases_response.get("Aliases", [])]
+        key_name = ", ".join(aliases) if aliases else "N/A"
+    except:
+        key_name = "N/A"
     
     # Get tags
     try:
         tags_response = kms_client.list_resource_tags(KeyId=key_id)
         tags = tags_response.get("Tags", [])
-        get_tag = lambda key: next((t["TagValue"] for t in tags if t["TagKey"] == key), "N/A")
     except:
         tags = []
-        get_tag = lambda key: "N/A"
     
     return {
         "AccountName": account_name,
         "AccountID": account_id,
         "KeyID": key_id,
-        "Domain": account_id,
         "KeyName": key_name,
         "Estado": key_state,
-        "KeyType": key_usage,
+        "KeyType": key_type,
+        "KeySpec": key_spec,
         "Tags": tags
     }
 
@@ -96,16 +102,16 @@ def insert_or_update_kms_data(kms_data):
         for kms in kms_data:
             processed += 1
             key_id = kms["KeyID"]
-            values = (kms["AccountName"], kms["AccountID"], kms["KeyID"], kms["Domain"], kms["KeyName"], kms["Estado"], kms["KeyType"], kms["Tags"])
+            values = (kms["AccountName"], kms["AccountID"], kms["KeyID"], kms["KeyName"], kms["Estado"], kms["KeyType"], kms["KeySpec"], kms["Tags"])
             
             if key_id not in existing:
-                cursor.execute("INSERT INTO kms (AccountName, AccountID, KeyID, Domain, KeyName, Estado, KeyType, Tags, last_updated) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)", values)
+                cursor.execute("INSERT INTO kms (AccountName, AccountID, KeyID, KeyName, Estado, KeyType, KeySpec, Tags, last_updated) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)", values)
                 inserted += 1
             else:
                 db_row = existing[key_id]
                 updates = []
                 vals = []
-                campos = {"accountname": kms["AccountName"], "accountid": kms["AccountID"], "keyid": kms["KeyID"], "domain": kms["Domain"], "keyname": kms["KeyName"], "estado": kms["Estado"], "keytype": kms["KeyType"], "tags": kms["Tags"]}
+                campos = {"accountname": kms["AccountName"], "accountid": kms["AccountID"], "keyid": kms["KeyID"], "keyname": kms["KeyName"], "estado": kms["Estado"], "keytype": kms["KeyType"], "keyspec": kms["KeySpec"], "tags": kms["Tags"]}
                 
                 for col, new_val in campos.items():
                     if str(db_row.get(col)) != str(new_val):
