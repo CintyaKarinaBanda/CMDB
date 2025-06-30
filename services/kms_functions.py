@@ -4,7 +4,7 @@ import time
 from services.utils import create_aws_client, get_db_connection
 
 def get_local_time():
-    return datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
+    return 'NOW()'
 
 FIELD_EVENT_MAP = {
     "keyname": ["CreateKey", "UpdateKeyDescription"],
@@ -109,7 +109,7 @@ def insert_or_update_kms_data(kms_data):
             values = (kms["AccountName"], kms["AccountID"], kms["KeyID"], kms["KeyName"], kms["Estado"], kms["KeyType"], kms["KeySpec"], kms["Tags"])
             
             if key_id not in existing:
-                cursor.execute("INSERT INTO kms (AccountName, AccountID, KeyID, KeyName, Estado, KeyType, KeySpec, Tags, last_updated) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)", values + (get_local_time(),))
+                cursor.execute("INSERT INTO kms (AccountName, AccountID, KeyID, KeyName, Estado, KeyType, KeySpec, Tags, last_updated) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())", values)
                 inserted += 1
             else:
                 db_row = existing[key_id]
@@ -124,7 +124,7 @@ def insert_or_update_kms_data(kms_data):
                         cursor.execute("INSERT INTO kms_changes_history (key_id, field_name, old_value, new_value, changed_by) VALUES (%s, %s, %s, %s, %s)", (key_id, col, str(db_row.get(col)), str(new_val), get_key_changed_by(key_id, col)))
                 
                 if updates:
-                    cursor.execute(f"UPDATE kms SET {', '.join(updates)}, last_updated = %s WHERE keyid = %s", vals + [get_local_time(), key_id])
+                    cursor.execute(f"UPDATE kms SET {', '.join(updates)}, last_updated = NOW() WHERE keyid = %s", vals + [key_id])
                     updated += 1
         
         conn.commit()

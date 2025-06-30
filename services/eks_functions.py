@@ -4,7 +4,7 @@ import time
 from services.utils import create_aws_client, get_db_connection
 
 def get_local_time():
-    return datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
+    return 'NOW()'
 
 FIELD_EVENT_MAP = {
     "clustername": ["CreateCluster", "UpdateClusterConfig"],
@@ -95,7 +95,7 @@ def insert_or_update_eks_data(eks_data):
             values = (eks["AccountName"], eks["AccountID"], eks["ClusterID"], eks["ClusterName"], eks["Status"], eks["KubernetesVersion"], eks["Provider"], eks["ClusterSecurityGroup"], eks["SupportPeriod"], eks["Addons"], eks["Tags"])
             
             if cluster_name not in existing:
-                cursor.execute("INSERT INTO eks (AccountName, AccountID, ClusterID, ClusterName, Status, KubernetesVersion, Provider, ClusterSecurityGroup, SupportPeriod, Addons, Tags, last_updated) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)", values + (get_local_time(),))
+                cursor.execute("INSERT INTO eks (AccountName, AccountID, ClusterID, ClusterName, Status, KubernetesVersion, Provider, ClusterSecurityGroup, SupportPeriod, Addons, Tags, last_updated) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())", values)
                 inserted += 1
             else:
                 db_row = existing[cluster_name]
@@ -110,7 +110,7 @@ def insert_or_update_eks_data(eks_data):
                         cursor.execute("INSERT INTO eks_changes_history (cluster_name, field_name, old_value, new_value, changed_by) VALUES (%s, %s, %s, %s, %s)", (cluster_name, col, str(db_row.get(col)), str(new_val), get_cluster_changed_by(cluster_name, col)))
                 
                 if updates:
-                    cursor.execute(f"UPDATE eks SET {', '.join(updates)}, last_updated = %s WHERE clustername = %s", vals + [get_local_time(), cluster_name])
+                    cursor.execute(f"UPDATE eks SET {', '.join(updates)}, last_updated = NOW() WHERE clustername = %s", vals + [cluster_name])
                     updated += 1
         
         conn.commit()

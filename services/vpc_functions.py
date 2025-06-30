@@ -192,7 +192,7 @@ def insert_or_update_vpc_data(vpc_data):
             )
 
             if vpc_id not in existing_data:
-                cursor.execute(query_insert.replace('CURRENT_TIMESTAMP', '%s'), insert_values + (datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S'),))
+                cursor.execute(query_insert.replace('CURRENT_TIMESTAMP', 'NOW()'), insert_values)
                 inserted += 1
             else:
                 db_row = existing_data[vpc_id]
@@ -234,8 +234,7 @@ def insert_or_update_vpc_data(vpc_data):
                             (vpc_id, col, str(old_val), str(new_val), changed_by)
                         )
 
-                updates.append("last_updated = %s")
-                values.append(datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S'))
+                updates.append("last_updated = NOW()")
 
                 if updates:
                     update_query = f"UPDATE vpcs SET {', '.join(updates)} WHERE vpc_id = %s"

@@ -145,24 +145,23 @@ def insert_or_update_s3_data(s3_data):
                     INSERT INTO s3 (account_name, account_id, bucket_name, bucket_name_display,
                     region, status, owner, integrations, network_config, backup_recovery,
                     encryption, versioning, capacity, last_updated)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
                 """, (
                     b["AccountName"], b["AccountID"], bn, b["BucketNameDisplay"], b["Region"],
                     b["Status"], b["Owner"], b["Integrations"], b["NetworkConfig"],
-                    b["BackupRecovery"], b["Encryption"], b["Versioning"], b["Capacity"],
-                    datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
+                    b["BackupRecovery"], b["Encryption"], b["Versioning"], b["Capacity"]
                 ))
                 ins += 1
             else:
                 cur.execute("""
                     UPDATE s3 SET owner=%s, integrations=%s, network_config=%s,
                     backup_recovery=%s, encryption=%s, versioning=%s,
-                    capacity=%s, last_updated=%s
+                    capacity=%s, last_updated=NOW()
                     WHERE bucket_name=%s
                 """, (
                     b["Owner"], b["Integrations"], b["NetworkConfig"],
                     b["BackupRecovery"], b["Encryption"], b["Versioning"],
-                    b["Capacity"], datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S'), bn
+                    b["Capacity"], bn
                 ))
                 upd += 1
 

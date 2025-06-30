@@ -133,7 +133,7 @@ def insert_or_update_rds_data(rds_data):
             )
 
             if instance_id not in existing_data:
-                cursor.execute(query_insert.replace('CURRENT_TIMESTAMP', '%s'), insert_values + (datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S'),))
+                cursor.execute(query_insert.replace('CURRENT_TIMESTAMP', 'NOW()'), insert_values)
                 inserted += 1
             else:
                 db_row = existing_data[instance_id]
@@ -171,8 +171,7 @@ def insert_or_update_rds_data(rds_data):
                             (instance_id, col, str(old_val), str(new_val), changed_by)
                         )
 
-                updates.append("last_updated = %s")
-                values.append(datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S'))
+                updates.append("last_updated = NOW()")
 
                 if updates:
                     update_query = f"UPDATE rds SET {', '.join(updates)} WHERE dbinstanceid = %s"

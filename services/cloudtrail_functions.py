@@ -12,7 +12,7 @@ def convert_to_local_time(utc_time):
     return datetime.fromtimestamp(utc_timestamp)
 
 def get_local_time():
-    return datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
+    return 'NOW()'
 
 IMPORTANT_EVENTS = {
     "StartInstances", "StopInstances", "RebootInstances", "TerminateInstances", "ModifyInstanceAttribute", "CreateTags", "DeleteTags", "RunInstances", "AttachVolume", "DetachVolume", "CreateVolume", "DeleteVolume", "ModifyVolume",
@@ -189,7 +189,8 @@ def insert_or_update_cloudtrail_events(events_data):
         cursor = conn.cursor()
         batch_data = [(event["event_id"], event["event_time"], event["event_name"], event["user_name"], event["resource_name"], RESOURCE_TYPES.get(event["event_source"], "Unknown"), event["region"], event["event_source"], event["account_id"], event["account_name"], event.get("changes")) for event in events_data]
         
-        cursor.executemany("INSERT INTO cloudtrail_events (event_id, event_time, event_name, user_name, resource_name, resource_type, region, event_source, account_id, account_name, changes, last_updated) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (event_id) DO NOTHING", [(event["event_id"], event["event_time"], event["event_name"], event["user_name"], event["resource_name"], RESOURCE_TYPES.get(event["event_source"], "Unknown"), event["region"], event["event_source"], event["account_id"], event["account_name"], event.get("changes"), get_local_time()) for event in events_data])
+        batch_data = [(event["event_id"], event["event_time"], event["event_name"], event["user_name"], event["resource_name"], RESOURCE_TYPES.get(event["event_source"], "Unknown"), event["region"], event["event_source"], event["account_id"], event["account_name"], event.get("changes")) for event in events_data]
+        cursor.executemany("INSERT INTO cloudtrail_events (event_id, event_time, event_name, user_name, resource_name, resource_type, region, event_source, account_id, account_name, changes, last_updated) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW()) ON CONFLICT (event_id) DO NOTHING", batch_data)
         
         inserted = cursor.rowcount
         conn.commit()

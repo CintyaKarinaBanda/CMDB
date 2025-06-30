@@ -4,7 +4,7 @@ import time
 from services.utils import create_aws_client, get_db_connection
 
 def get_local_time():
-    return datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
+    return 'NOW()'
 
 FIELD_EVENT_MAP = {
     "repositoryname": ["CreateRepository", "DeleteRepository"],
@@ -99,7 +99,7 @@ def insert_or_update_ecr_data(ecr_data):
             values = (ecr["AccountName"], ecr["AccountID"], ecr["RepositoryName"], ecr["Domain"], ecr["BusinessAppID"], ecr["RepositorySize"], ecr["ArtifactType"], ecr["ImageTags"])
             
             if repo_name not in existing:
-                cursor.execute("INSERT INTO ecr (AccountName, AccountID, RepositoryName, Domain, BusinessAppID, RepositorySize, ArtifactType, ImageTags, last_updated) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)", values + (get_local_time(),))
+                cursor.execute("INSERT INTO ecr (AccountName, AccountID, RepositoryName, Domain, BusinessAppID, RepositorySize, ArtifactType, ImageTags, last_updated) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())", values)
                 inserted += 1
             else:
                 db_row = existing[repo_name]
@@ -114,7 +114,7 @@ def insert_or_update_ecr_data(ecr_data):
                         cursor.execute("INSERT INTO ecr_changes_history (repository_name, field_name, old_value, new_value, changed_by) VALUES (%s, %s, %s, %s, %s)", (repo_name, col, str(db_row.get(col)), str(new_val), get_repository_changed_by(repo_name, col)))
                 
                 if updates:
-                    cursor.execute(f"UPDATE ecr SET {', '.join(updates)}, last_updated = %s WHERE repositoryname = %s", vals + [get_local_time(), repo_name])
+                    cursor.execute(f"UPDATE ecr SET {', '.join(updates)}, last_updated = NOW() WHERE repositoryname = %s", vals + [repo_name])
                     updated += 1
         
         conn.commit()
