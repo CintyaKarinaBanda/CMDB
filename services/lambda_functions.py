@@ -1,6 +1,12 @@
 from botocore.exceptions import ClientError
 from datetime import datetime
+import pytz
 from services.utils import create_aws_client, get_db_connection
+
+MEXICO_TZ = pytz.timezone('America/Mexico_City')
+
+def get_mexico_time():
+    return datetime.now(MEXICO_TZ).strftime('%Y-%m-%d %H:%M:%S')
 
 FIELD_EVENT_MAP = {
     "functionname": ["CreateFunction", "UpdateFunctionConfiguration"],
@@ -117,7 +123,7 @@ def insert_or_update_lambda_data(lambda_data):
             values = (func["AccountName"], func["AccountID"], func["FunctionID"], func["FunctionName"], func["Description"], func["Handler"], func["Runtime"], func["MemorySize"], func["Timeout"], func["Role"], func["Environment"], func["Triggers"], func["VPCConfig"], func["Region"], func["Tags"])
             
             if function_name not in existing:
-                cursor.execute("INSERT INTO lambda_functions (AccountName, AccountID, FunctionID, FunctionName, Description, Handler, Runtime, MemorySize, Timeout, Role, Environment, Triggers, VPCConfig, Region, Tags, last_updated) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)", values)
+                cursor.execute("INSERT INTO lambda_functions (AccountName, AccountID, FunctionID, FunctionName, Description, Handler, Runtime, MemorySize, Timeout, Role, Environment, Triggers, VPCConfig, Region, Tags, last_updated) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)", values + (get_mexico_time(),))
                 inserted += 1
             else:
                 db_row = existing[function_name]
@@ -132,7 +138,7 @@ def insert_or_update_lambda_data(lambda_data):
                         cursor.execute("INSERT INTO lambda_changes_history (function_name, field_name, old_value, new_value, changed_by) VALUES (%s, %s, %s, %s, %s)", (function_name, col, str(db_row.get(col)), str(new_val), get_function_changed_by(function_name, col)))
                 
                 if updates:
-                    cursor.execute(f"UPDATE lambda_functions SET {', '.join(updates)}, last_updated = CURRENT_TIMESTAMP WHERE functionname = %s", vals + [function_name])
+                    cursor.execute(f"UPDATE lambda_functions SET {', '.join(updates)}, last_updated = %s WHERE functionname = %s", vals + [get_mexico_time(), function_name])
                     updated += 1
         
         conn.commit()

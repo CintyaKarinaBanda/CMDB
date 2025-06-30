@@ -34,11 +34,8 @@ def assume_role(role_arn):
         return {"error": str(e)}
 
 def process_account_region(account_id, role_name, account_name, region, services):
-    """Procesa una combinación de cuenta/región para los servicios solicitados."""
-    start = datetime.now()
     creds = assume_role(f"arn:aws:iam::{account_id}:role/{role_name}")
     if "error" in creds:
-        print(f"[{account_id}:{region}] Error al asumir rol: {creds['error']}")
         return {"account_id": account_id, "region": region, "error": creds["error"]}
 
     service_funcs = {
@@ -57,16 +54,10 @@ def process_account_region(account_id, role_name, account_name, region, services
 
     result = {"account_id": account_id, "region": region, "credentials": creds}
     for service in services:
-        if (datetime.now() - start).total_seconds() > 300:  # 5 min timeout
-            print(f"[{account_id}:{region}] Tiempo límite excedido")
-            break
         try:
-            key = f"{service}_data"
-            result[key] = service_funcs.get(service, lambda: [])()
-        except Exception as e:
-            print(f"[{account_id}:{region}] Error en {service}: {str(e)}")
-    
-    print(f"[{account_id}:{region}] Completado en {(datetime.now() - start).total_seconds():.2f}s")
+            result[f"{service}_data"] = service_funcs.get(service, lambda: [])()
+        except:
+            pass
     return result
 
 def main(services):
@@ -88,7 +79,8 @@ def main(services):
         
         for i, future in enumerate(as_completed(futures), 1):
             res = future.result()
-            print(f"[Progreso] {i}/{total_jobs} ({i/total_jobs*100:.1f}%)")
+            if i % 10 == 0 or i == total_jobs:
+                print(f"[{i}/{total_jobs}]")
             
             if "error" in res:
                 errors.setdefault(res["account_id"], []).append(f"{res['region']}: {res['error']}")
@@ -115,11 +107,9 @@ def main(services):
         "lambda": insert_or_update_lambda_data
     }
 
-    print("\n=== Insertando datos en la base de datos ===")
     for s in services:
         entries = collected_data.get(s, [])
         if not entries:
-            messages.append(f"{s.upper()}: No hay datos para insertar")
             continue
         
         grouped = {}
@@ -127,25 +117,25 @@ def main(services):
             key = (e["region"], tuple(sorted(e["credentials"].items())))
             grouped.setdefault(key, []).append(e["data"])
         
+        total_inserted = total_updated = 0
         for (reg, _), data in grouped.items():
             res = insert_funcs[s](data)
-            messages.append(
-                f"{s.upper()} ({reg}): {len(data)} items "
-                f"({res.get('inserted', 0)} insertados{', ' + str(res.get('updated', 0)) + ' actualizados' if res.get('updated', 0) else ''})"
-            )
+            total_inserted += res.get('inserted', 0)
+            total_updated += res.get('updated', 0)
+        
+        if total_inserted or total_updated:
+            status = f"{total_inserted} nuevos" if total_inserted and not total_updated else f"{total_updated} actualizados" if total_updated and not total_inserted else f"{total_inserted} nuevos, {total_updated} actualizados"
+            messages.append(f"{s.upper()}: {status}")
 
-    print("\n=== Resultados ===")
-    print("\n".join(messages))
+    print(f"✅ Completado: {' | '.join(messages)} | ⏱️ {(datetime.now() - start).total_seconds():.0f}s")
     if errors:
-        print(f"\nErrores en {len(errors)} cuentas:")
-        for acc, errs in errors.items():
-            print(f"- Cuenta {acc}: {len(errs)} errores")
-    
-    print(f"\n=== Proceso completado en {(datetime.now() - start).total_seconds():.2f} segundos ===")
+        print(f"Errores: {len(errors)} cuentas")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Recolecta información de recursos AWS')
     parser.add_argument('--services', nargs='+', default=["ec2", "cloudtrail"],
-                      choices=["ec2", "rds", "redshift", "vpc", "subnets", "cloudtrail", "s3", "eks", "ecr", "kms", "lambda"],
+                      choices=["ec2", "rds", "redshift", "vpc", "subnets", "cloudtrail", "s3", "eks", "ecr", "kms", "lambda", "all"],
                       help='Servicios a consultar')
-    main(parser.parse_args().services)
+    args = parser.parse_args()
+    services = ["ec2", "rds", "redshift", "vpc", "subnets", "s3", "eks", "ecr", "kms", "lambda"] if "all" in args.services else args.services
+    main(services)

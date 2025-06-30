@@ -1,18 +1,28 @@
 # cloudtrail_simple.py
 import json
 from datetime import datetime, timedelta
+import pytz
 from services.utils import create_aws_client
 
+MEXICO_TZ = pytz.timezone('America/Mexico_City')
+
+def convert_to_mexico_time(utc_time):
+    if isinstance(utc_time, str):
+        utc_time = datetime.fromisoformat(utc_time.replace('Z', '+00:00'))
+    if utc_time.tzinfo is None:
+        utc_time = pytz.utc.localize(utc_time)
+    return utc_time.astimezone(MEXICO_TZ)
+
 IMPORTANT_EVENTS = {
-    "StartInstances", "StopInstances", "RebootInstances", "TerminateInstances", "ModifyInstanceAttribute", "CreateTags", "DeleteTags", "RunInstances", "AttachVolume", "DetachVolume",
-    "CreateDBInstance", "DeleteDBInstance", "ModifyDBInstance", "RebootDBInstance", "StartDBInstance", "StopDBInstance", "CreateDBSnapshot", "DeleteDBSnapshot",
-    "CreateVpc", "DeleteVpc", "ModifyVpcAttribute", "CreateSubnet", "DeleteSubnet", "CreateRouteTable", "DeleteRouteTable", "CreateInternetGateway", "DeleteInternetGateway",
-    "CreateNatGateway", "DeleteNatGateway", "CreateCluster", "DeleteCluster", "ModifyCluster", "RebootCluster", "ResizeCluster", "PauseCluster", "ResumeCluster",
-    "CreateBucket", "DeleteBucket", "PutBucketTagging", "PutBucketEncryption", "PutBucketVersioning", "PutBucketPolicy",
+    "StartInstances", "StopInstances", "RebootInstances", "TerminateInstances", "ModifyInstanceAttribute", "CreateTags", "DeleteTags", "RunInstances", "AttachVolume", "DetachVolume", "CreateVolume", "DeleteVolume", "ModifyVolume",
+    "CreateDBInstance", "DeleteDBInstance", "ModifyDBInstance", "RebootDBInstance", "StartDBInstance", "StopDBInstance", "CreateDBSnapshot", "DeleteDBSnapshot", "RestoreDBInstanceFromDBSnapshot", "AddTagsToResource", "RemoveTagsFromResource",
+    "CreateVpc", "DeleteVpc", "ModifyVpcAttribute", "CreateSubnet", "DeleteSubnet", "ModifySubnetAttribute", "CreateRouteTable", "DeleteRouteTable", "CreateInternetGateway", "DeleteInternetGateway", "AttachInternetGateway", "DetachInternetGateway",
+    "CreateNatGateway", "DeleteNatGateway", "CreateCluster", "DeleteCluster", "ModifyCluster", "RebootCluster", "ResizeCluster", "PauseCluster", "ResumeCluster", "RestoreFromClusterSnapshot", "CreateClusterSnapshot", "DeleteClusterSnapshot",
+    "CreateBucket", "DeleteBucket", "PutBucketTagging", "PutBucketEncryption", "PutBucketVersioning", "PutBucketPolicy", "DeleteBucketPolicy", "PutBucketNotification", "PutPublicAccessBlock", "PutBucketReplication", "DeleteBucketReplication", "PutBucketAcl",
     "UpdateClusterConfig", "UpdateClusterVersion", "CreateAddon", "DeleteAddon", "UpdateAddon", "TagResource", "UntagResource",
     "CreateRepository", "DeleteRepository", "PutImage", "BatchDeleteImage", "PutRepositoryPolicy", "DeleteRepositoryPolicy",
-    "CreateKey", "ScheduleKeyDeletion", "CancelKeyDeletion", "EnableKey", "DisableKey", "UpdateKeyDescription", "PutKeyPolicy", "CreateAlias", "DeleteAlias",
-    "CreateFunction", "DeleteFunction", "UpdateFunctionCode", "UpdateFunctionConfiguration", "PublishVersion", "CreateEventSourceMapping", "DeleteEventSourceMapping"
+    "CreateKey", "ScheduleKeyDeletion", "CancelKeyDeletion", "EnableKey", "DisableKey", "UpdateKeyDescription", "PutKeyPolicy", "CreateAlias", "DeleteAlias", "UpdateAlias",
+    "CreateFunction", "DeleteFunction", "UpdateFunctionCode", "UpdateFunctionConfiguration", "PublishVersion", "CreateEventSourceMapping", "DeleteEventSourceMapping", "UpdateEventSourceMapping", "PutFunctionConcurrency", "DeleteFunctionConcurrency"
 }
 
 EVENT_SOURCES = ["ec2.amazonaws.com", "rds.amazonaws.com", "redshift.amazonaws.com", "s3.amazonaws.com", "eks.amazonaws.com", "ecr.amazonaws.com", "kms.amazonaws.com", "lambda.amazonaws.com"]
@@ -60,7 +70,7 @@ def extract_resource_name(event_detail):
     return "unknown"
 
 def is_valid_resource(resource_name, event_source):
-    return resource_name and resource_name != "unknown" and (resource_name.startswith(("i-", "vpc-", "subnet-")) or event_source in ["rds.amazonaws.com", "redshift.amazonaws.com", "s3.amazonaws.com", "eks.amazonaws.com", "ecr.amazonaws.com"])
+    return resource_name and resource_name != "unknown" and (resource_name.startswith(("i-", "vpc-", "subnet-", "vol-", "snap-", "igw-", "nat-", "rtb-")) or event_source in ["rds.amazonaws.com", "redshift.amazonaws.com", "s3.amazonaws.com", "eks.amazonaws.com", "ecr.amazonaws.com", "kms.amazonaws.com", "lambda.amazonaws.com"])
 
 def extract_changes(event_detail):
     req = event_detail.get("requestParameters", {})
@@ -158,7 +168,7 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
                     if detail.get("eventName") in IMPORTANT_EVENTS:
                         basic_info = extract_basic_info(detail)
                         if is_valid_resource(basic_info["resource_name"], detail.get("eventSource", source)):
-                            all_events.append({"event_id": event.get("EventId"), "event_time": event.get("EventTime"), **basic_info, "region": region, "event_source": detail.get("eventSource", source), "account_id": account_id, "account_name": account_name})
+                            all_events.append({"event_id": event.get("EventId"), "event_time": convert_to_mexico_time(event.get("EventTime")), **basic_info, "region": region, "event_source": detail.get("eventSource", source), "account_id": account_id, "account_name": account_name})
                 except: pass
             
             if not next_token: break
@@ -178,7 +188,7 @@ def insert_or_update_cloudtrail_events(events_data):
         cursor = conn.cursor()
         batch_data = [(event["event_id"], event["event_time"], event["event_name"], event["user_name"], event["resource_name"], RESOURCE_TYPES.get(event["event_source"], "Unknown"), event["region"], event["event_source"], event["account_id"], event["account_name"], event.get("changes")) for event in events_data]
         
-        cursor.executemany("INSERT INTO cloudtrail_events (event_id, event_time, event_name, user_name, resource_name, resource_type, region, event_source, account_id, account_name, changes, last_updated) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP) ON CONFLICT (event_id) DO NOTHING", batch_data)
+        cursor.executemany("INSERT INTO cloudtrail_events (event_id, event_time, event_name, user_name, resource_name, resource_type, region, event_source, account_id, account_name, changes, last_updated) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (event_id) DO NOTHING", [(event["event_id"], event["event_time"], event["event_name"], event["user_name"], event["resource_name"], RESOURCE_TYPES.get(event["event_source"], "Unknown"), event["region"], event["event_source"], event["account_id"], event["account_name"], event.get("changes"), datetime.now(MEXICO_TZ).strftime('%Y-%m-%d %H:%M:%S')) for event in events_data])
         
         inserted = cursor.rowcount
         conn.commit()
