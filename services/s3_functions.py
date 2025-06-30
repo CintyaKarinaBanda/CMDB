@@ -1,5 +1,6 @@
 from botocore.exceptions import ClientError
 from datetime import datetime, timedelta
+import time
 from services.utils import create_aws_client, get_db_connection
 
 def get_bucket_changed_by(bucket_name, field_name):
@@ -144,23 +145,24 @@ def insert_or_update_s3_data(s3_data):
                     INSERT INTO s3 (account_name, account_id, bucket_name, bucket_name_display,
                     region, status, owner, integrations, network_config, backup_recovery,
                     encryption, versioning, capacity, last_updated)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, (
                     b["AccountName"], b["AccountID"], bn, b["BucketNameDisplay"], b["Region"],
                     b["Status"], b["Owner"], b["Integrations"], b["NetworkConfig"],
-                    b["BackupRecovery"], b["Encryption"], b["Versioning"], b["Capacity"]
+                    b["BackupRecovery"], b["Encryption"], b["Versioning"], b["Capacity"],
+                    datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
                 ))
                 ins += 1
             else:
                 cur.execute("""
                     UPDATE s3 SET owner=%s, integrations=%s, network_config=%s,
                     backup_recovery=%s, encryption=%s, versioning=%s,
-                    capacity=%s, last_updated=CURRENT_TIMESTAMP
+                    capacity=%s, last_updated=%s
                     WHERE bucket_name=%s
                 """, (
                     b["Owner"], b["Integrations"], b["NetworkConfig"],
                     b["BackupRecovery"], b["Encryption"], b["Versioning"],
-                    b["Capacity"], bn
+                    b["Capacity"], datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S'), bn
                 ))
                 upd += 1
 

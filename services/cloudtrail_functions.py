@@ -1,17 +1,18 @@
 # cloudtrail_simple.py
 import json
 from datetime import datetime, timedelta
-import pytz
+import time
 from services.utils import create_aws_client
 
-MEXICO_TZ = pytz.timezone('America/Mexico_City')
-
-def convert_to_mexico_time(utc_time):
+def convert_to_local_time(utc_time):
     if isinstance(utc_time, str):
         utc_time = datetime.fromisoformat(utc_time.replace('Z', '+00:00'))
-    if utc_time.tzinfo is None:
-        utc_time = pytz.utc.localize(utc_time)
-    return utc_time.astimezone(MEXICO_TZ)
+    # Convert UTC to local timestamp
+    utc_timestamp = utc_time.timestamp()
+    return datetime.fromtimestamp(utc_timestamp)
+
+def get_local_time():
+    return datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
 
 IMPORTANT_EVENTS = {
     "StartInstances", "StopInstances", "RebootInstances", "TerminateInstances", "ModifyInstanceAttribute", "CreateTags", "DeleteTags", "RunInstances", "AttachVolume", "DetachVolume", "CreateVolume", "DeleteVolume", "ModifyVolume",
@@ -168,7 +169,7 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
                     if detail.get("eventName") in IMPORTANT_EVENTS:
                         basic_info = extract_basic_info(detail)
                         if is_valid_resource(basic_info["resource_name"], detail.get("eventSource", source)):
-                            all_events.append({"event_id": event.get("EventId"), "event_time": convert_to_mexico_time(event.get("EventTime")), **basic_info, "region": region, "event_source": detail.get("eventSource", source), "account_id": account_id, "account_name": account_name})
+                            all_events.append({"event_id": event.get("EventId"), "event_time": convert_to_local_time(event.get("EventTime")), **basic_info, "region": region, "event_source": detail.get("eventSource", source), "account_id": account_id, "account_name": account_name})
                 except: continue
             
             if not next_token: break
@@ -188,7 +189,7 @@ def insert_or_update_cloudtrail_events(events_data):
         cursor = conn.cursor()
         batch_data = [(event["event_id"], event["event_time"], event["event_name"], event["user_name"], event["resource_name"], RESOURCE_TYPES.get(event["event_source"], "Unknown"), event["region"], event["event_source"], event["account_id"], event["account_name"], event.get("changes")) for event in events_data]
         
-        cursor.executemany("INSERT INTO cloudtrail_events (event_id, event_time, event_name, user_name, resource_name, resource_type, region, event_source, account_id, account_name, changes, last_updated) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (event_id) DO NOTHING", [(event["event_id"], event["event_time"], event["event_name"], event["user_name"], event["resource_name"], RESOURCE_TYPES.get(event["event_source"], "Unknown"), event["region"], event["event_source"], event["account_id"], event["account_name"], event.get("changes"), datetime.now(MEXICO_TZ).strftime('%Y-%m-%d %H:%M:%S')) for event in events_data])
+        cursor.executemany("INSERT INTO cloudtrail_events (event_id, event_time, event_name, user_name, resource_name, resource_type, region, event_source, account_id, account_name, changes, last_updated) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (event_id) DO NOTHING", [(event["event_id"], event["event_time"], event["event_name"], event["user_name"], event["resource_name"], RESOURCE_TYPES.get(event["event_source"], "Unknown"), event["region"], event["event_source"], event["account_id"], event["account_name"], event.get("changes"), get_local_time()) for event in events_data])
         
         inserted = cursor.rowcount
         conn.commit()

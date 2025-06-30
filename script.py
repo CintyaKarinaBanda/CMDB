@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import boto3, argparse
 from datetime import datetime
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from botocore.exceptions import ClientError
 
@@ -62,7 +63,8 @@ def process_account_region(account_id, role_name, account_name, region, services
 def main(services):
     """Función principal que coordina la recolección de datos."""
     start = datetime.now()
-    print(f"=== Iniciando proceso: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===")
+    local_time = datetime.fromtimestamp(time.time())
+    print(f"=== Iniciando proceso: {local_time.strftime('%Y-%m-%d %H:%M:%S')} ===")
     print(f"Servicios: {', '.join(services)}")
 
     errors, collected_data, messages = {}, {s: [] for s in services}, []

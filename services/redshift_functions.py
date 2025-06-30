@@ -1,5 +1,6 @@
 from botocore.exceptions import ClientError
 from datetime import datetime
+import time
 from services.utils import create_aws_client, get_db_connection
 
 FIELD_EVENT_MAP = {
@@ -138,7 +139,7 @@ def insert_or_update_redshift_data(redshift_data):
             )
 
             if database_id not in existing_data:
-                cursor.execute(query_insert, insert_values)
+                cursor.execute(query_insert.replace('CURRENT_TIMESTAMP', '%s'), insert_values + (datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S'),))
                 inserted += 1
             else:
                 db_row = existing_data[database_id]
@@ -177,7 +178,8 @@ def insert_or_update_redshift_data(redshift_data):
                             (database_id, col, str(old_val), str(new_val), changed_by)
                         )
 
-                updates.append("last_updated = CURRENT_TIMESTAMP")
+                updates.append("last_updated = %s")
+                values.append(datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S'))
 
                 if updates:
                     update_query = f"UPDATE redshift SET {', '.join(updates)} WHERE database_id = %s"
