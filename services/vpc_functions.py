@@ -45,7 +45,7 @@ def get_vpc_changed_by(vpc_id, field_name):
                 return result[0]
             return "unknown"
     except Exception as e:
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ERROR: changed_by {vpc_id}/{field_name} - {str(e)}")
+        pass
         return "unknown"
     finally:
         conn.close()
@@ -111,7 +111,6 @@ def get_vpc_details(region, credentials, account_id, account_name):
         return vpcs_info
     
     except ClientError as e:
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ERROR: VPC {region}/{account_id} - {str(e)}")
         return []
 
 def insert_or_update_vpc_data(vpc_data):
@@ -251,7 +250,7 @@ def insert_or_update_vpc_data(vpc_data):
 
     except Exception as e:
         conn.rollback()
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ERROR: DB vpc_data - {str(e)}")
+        pass
         return {
             "error": str(e),
             "processed": processed,

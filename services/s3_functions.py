@@ -21,7 +21,7 @@ def get_bucket_changed_by(bucket_name, field_name):
 
 def get_bucket_size(bucket_name, cw_client):
     if not cw_client:
-        print(f"DEBUG: No CloudWatch client for {bucket_name}")
+        pass
         return "N/A"
 
     try:
@@ -44,7 +44,7 @@ def get_bucket_size(bucket_name, cw_client):
                     latest = max(datapoints, key=lambda x: x['Timestamp'])
                     total_bytes += int(latest.get('Maximum', 0))
             except Exception as e:
-                print(f"ERROR {st} - {bucket_name}: {e}")
+                pass
 
         if total_bytes == 0: return "0 B"
         for unit, size in [("TB", 1024**4), ("GB", 1024**3), ("MB", 1024**2), ("KB", 1024)]:
@@ -52,7 +52,7 @@ def get_bucket_size(bucket_name, cw_client):
                 return f"{total_bytes / size:.2f} {unit}"
         return f"{total_bytes} B"
     except Exception as e:
-        print(f"Error getting bucket size for {bucket_name}: {e}")
+        pass
         return "N/A"
 
 def extract_bucket_data(bucket, s3, account_name, account_id, region, cw_client):
@@ -102,7 +102,7 @@ def extract_bucket_data(bucket, s3, account_name, account_id, region, cw_client)
             "Encryption": encryption_config, "Versioning": versioning, "Capacity": capacity
         }
     except Exception as e:
-        print(f"ERROR extracting {name}: {e}")
+        pass
         return None
 
 def get_s3_buckets(region, credentials, account_id, account_name):
@@ -113,7 +113,7 @@ def get_s3_buckets(region, credentials, account_id, account_name):
     try:
         try: s3.list_buckets()
         except Exception as e:
-            print(f"Invalid credentials for {account_name}: {e}")
+            pass
             return []
 
         response = s3.list_buckets()
@@ -122,7 +122,7 @@ def get_s3_buckets(region, credentials, account_id, account_name):
             if (info := extract_bucket_data(b, s3, account_name, account_id, region, cw))
         ]
     except Exception as e:
-        print(f"ERROR get_s3_buckets {account_name}: {e}")
+        pass
         return []
 
 def insert_or_update_s3_data(s3_data):
