@@ -169,7 +169,7 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
                         basic_info = extract_basic_info(detail)
                         if is_valid_resource(basic_info["resource_name"], detail.get("eventSource", source)):
                             all_events.append({"event_id": event.get("EventId"), "event_time": convert_to_mexico_time(event.get("EventTime")), **basic_info, "region": region, "event_source": detail.get("eventSource", source), "account_id": account_id, "account_name": account_name})
-                except: pass
+                except: continue
             
             if not next_token: break
     

@@ -30,7 +30,6 @@ def assume_role(role_arn):
         )["Credentials"]
         return {k: creds[k] for k in ["AccessKeyId", "SecretAccessKey", "SessionToken"]}
     except ClientError as e:
-        print(f"Error al asumir el rol {role_arn}: {str(e)}")
         return {"error": str(e)}
 
 def process_account_region(account_id, role_name, account_name, region, services):
@@ -129,7 +128,7 @@ def main(services):
 
     print(f"✅ Completado: {' | '.join(messages)} | ⏱️ {(datetime.now() - start).total_seconds():.0f}s")
     if errors:
-        print(f"Errores: {len(errors)} cuentas")
+        print(f"❌ {len(errors)} cuentas sin acceso")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Recolecta información de recursos AWS')
