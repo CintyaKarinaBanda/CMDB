@@ -135,12 +135,12 @@ def insert_or_update_s3_data(s3_data):
         cur = conn.cursor()
         cur.execute("SELECT * FROM s3")
         cols = [d[0].lower() for d in cur.description]
-        existing = {r[cols.index("bucket_name")]: dict(zip(cols, r)) for r in cur.fetchall()}
+        existing = {(r[cols.index("bucket_name")], r[cols.index("account_id")]): dict(zip(cols, r)) for r in cur.fetchall()}
 
         ins, upd = 0, 0
         for b in s3_data:
             bn = b["BucketName"]
-            if bn not in existing:
+            if (bn, b["AccountID"]) not in existing:
                 cur.execute("""
                     INSERT INTO s3 (account_name, account_id, bucket_name, bucket_name_display,
                     region, status, owner, integrations, network_config, backup_recovery,

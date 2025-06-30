@@ -15,6 +15,13 @@ FIELD_EVENT_MAP = {
     "replication": ["CreateCluster", "ModifyCluster"]
 }
 
+def normalize_list_comparison(old_val, new_val):
+    """Normaliza listas para comparación, ignorando orden"""
+    if isinstance(new_val, list) and isinstance(old_val, (list, str)):
+        old_list = old_val if isinstance(old_val, list) else str(old_val).split(',') if old_val else []
+        return sorted([str(x).strip() for x in old_list]) == sorted([str(x).strip() for x in new_val])
+    return str(old_val) == str(new_val)
+
 def get_cluster_changed_by(cluster_id, field_name):
     """Busca el usuario que cambió un campo específico"""
     conn = get_db_connection()
@@ -124,7 +131,7 @@ def insert_or_update_redshift_data(redshift_data):
         # Obtener datos existentes
         cursor.execute("SELECT * FROM redshift")
         columns = [desc[0].lower() for desc in cursor.description]
-        existing_data = {row[columns.index("database_id")]: dict(zip(columns, row)) for row in cursor.fetchall()}
+        existing_data = {(row[columns.index("database_id")], row[columns.index("account_id")]): dict(zip(columns, row)) for row in cursor.fetchall()}
 
         for cluster in redshift_data:
             database_id = cluster["DatabaseId"]
@@ -138,11 +145,11 @@ def insert_or_update_redshift_data(redshift_data):
                 cluster["AccountID"], cluster["AccountName"]
             )
 
-            if database_id not in existing_data:
+            if (database_id, cluster["AccountID"]) not in existing_data:
                 cursor.execute(query_insert.replace('CURRENT_TIMESTAMP', 'NOW()'), insert_values)
                 inserted += 1
             else:
-                db_row = existing_data[database_id]
+                db_row = existing_data[(database_id, cluster["AccountID"])]
                 updates = []
                 values = []
 
@@ -165,18 +172,11 @@ def insert_or_update_redshift_data(redshift_data):
 
                 for col, new_val in campos.items():
                     old_val = db_row.get(col)
-                    if str(old_val) != str(new_val):
+                    if not normalize_list_comparison(old_val, new_val):
                         updates.append(f"{col} = %s")
                         values.append(new_val)
-                        changed_by = get_cluster_changed_by(
-                            cluster_id=database_id,
-                            field_name=col
-                        )
-                        
-                        cursor.execute(
-                            query_change_history,
-                            (database_id, col, str(old_val), str(new_val), changed_by)
-                        )
+                        changed_by = get_cluster_changed_by(cluster_id=database_id, field_name=col)
+                        cursor.execute(query_change_history, (database_id, col, str(old_val), str(new_val), changed_by))
 
                 updates.append("last_updated = NOW()")
 

@@ -19,6 +19,13 @@ FIELD_EVENT_MAP = {
     "tags": ["TagResource", "UntagResource"]
 }
 
+def normalize_list_comparison(old_val, new_val):
+    """Normaliza listas para comparación, ignorando orden"""
+    if isinstance(new_val, list) and isinstance(old_val, (list, str)):
+        old_list = old_val if isinstance(old_val, list) else str(old_val).split(',') if old_val else []
+        return sorted([str(x).strip() for x in old_list]) == sorted([str(x).strip() for x in new_val])
+    return str(old_val) == str(new_val)
+
 def get_function_changed_by(function_name, field_name):
     conn = get_db_connection()
     if not conn:
@@ -113,27 +120,28 @@ def insert_or_update_lambda_data(lambda_data):
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM lambda_functions")
         columns = [desc[0].lower() for desc in cursor.description]
-        existing = {row[columns.index("functionname")]: dict(zip(columns, row)) for row in cursor.fetchall()}
+        existing = {(row[columns.index("functionname")], row[columns.index("accountid")]): dict(zip(columns, row)) for row in cursor.fetchall()}
         
         for func in lambda_data:
             processed += 1
             function_name = func["FunctionName"]
             values = (func["AccountName"], func["AccountID"], func["FunctionID"], func["FunctionName"], func["Description"], func["Handler"], func["Runtime"], func["MemorySize"], func["Timeout"], func["Role"], func["Environment"], func["Triggers"], func["VPCConfig"], func["Region"], func["Tags"])
             
-            if function_name not in existing:
+            if (function_name, func["AccountID"]) not in existing:
                 cursor.execute("INSERT INTO lambda_functions (AccountName, AccountID, FunctionID, FunctionName, Description, Handler, Runtime, MemorySize, Timeout, Role, Environment, Triggers, VPCConfig, Region, Tags, last_updated) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())", values)
                 inserted += 1
             else:
-                db_row = existing[function_name]
+                db_row = existing[(function_name, func["AccountID"])]
                 updates = []
                 vals = []
                 campos = {"accountname": func["AccountName"], "accountid": func["AccountID"], "functionid": func["FunctionID"], "functionname": func["FunctionName"], "description": func["Description"], "handler": func["Handler"], "runtime": func["Runtime"], "memorysize": func["MemorySize"], "timeout": func["Timeout"], "role": func["Role"], "environment": func["Environment"], "triggers": func["Triggers"], "vpcconfig": func["VPCConfig"], "region": func["Region"], "tags": func["Tags"]}
                 
                 for col, new_val in campos.items():
-                    if str(db_row.get(col)) != str(new_val):
+                    old_val = db_row.get(col)
+                    if not normalize_list_comparison(old_val, new_val):
                         updates.append(f"{col} = %s")
                         vals.append(new_val)
-                        cursor.execute("INSERT INTO lambda_changes_history (function_name, field_name, old_value, new_value, changed_by) VALUES (%s, %s, %s, %s, %s)", (function_name, col, str(db_row.get(col)), str(new_val), get_function_changed_by(function_name, col)))
+                        cursor.execute("INSERT INTO lambda_changes_history (function_name, field_name, old_value, new_value, changed_by) VALUES (%s, %s, %s, %s, %s)", (function_name, col, str(old_val), str(new_val), get_function_changed_by(function_name, col)))
                 
                 if updates:
                     cursor.execute(f"UPDATE lambda_functions SET {', '.join(updates)}, last_updated = NOW() WHERE functionname = %s", vals + [function_name])

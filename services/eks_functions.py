@@ -15,6 +15,13 @@ FIELD_EVENT_MAP = {
     "tags": ["TagResource", "UntagResource"]
 }
 
+def normalize_list_comparison(old_val, new_val):
+    """Normaliza listas para comparación, ignorando orden"""
+    if isinstance(new_val, list) and isinstance(old_val, (list, str)):
+        old_list = old_val if isinstance(old_val, list) else str(old_val).split(',') if old_val else []
+        return sorted([str(x).strip() for x in old_list]) == sorted([str(x).strip() for x in new_val])
+    return str(old_val) == str(new_val)
+
 def get_cluster_changed_by(cluster_name, field_name):
     conn = get_db_connection()
     if not conn:
@@ -87,27 +94,28 @@ def insert_or_update_eks_data(eks_data):
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM eks")
         columns = [desc[0].lower() for desc in cursor.description]
-        existing = {row[columns.index("clustername")]: dict(zip(columns, row)) for row in cursor.fetchall()}
+        existing = {(row[columns.index("clustername")], row[columns.index("accountid")]): dict(zip(columns, row)) for row in cursor.fetchall()}
         
         for eks in eks_data:
             processed += 1
             cluster_name = eks["ClusterName"]
             values = (eks["AccountName"], eks["AccountID"], eks["ClusterID"], eks["ClusterName"], eks["Status"], eks["KubernetesVersion"], eks["Provider"], eks["ClusterSecurityGroup"], eks["SupportPeriod"], eks["Addons"], eks["Tags"])
             
-            if cluster_name not in existing:
+            if (cluster_name, eks["AccountID"]) not in existing:
                 cursor.execute("INSERT INTO eks (AccountName, AccountID, ClusterID, ClusterName, Status, KubernetesVersion, Provider, ClusterSecurityGroup, SupportPeriod, Addons, Tags, last_updated) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())", values)
                 inserted += 1
             else:
-                db_row = existing[cluster_name]
+                db_row = existing[(cluster_name, eks["AccountID"])]
                 updates = []
                 vals = []
                 campos = {"accountname": eks["AccountName"], "accountid": eks["AccountID"], "clusterid": eks["ClusterID"], "clustername": eks["ClusterName"], "status": eks["Status"], "kubernetesversion": eks["KubernetesVersion"], "provider": eks["Provider"], "clustersecuritygroup": eks["ClusterSecurityGroup"], "supportperiod": eks["SupportPeriod"], "addons": eks["Addons"], "tags": eks["Tags"]}
                 
                 for col, new_val in campos.items():
-                    if str(db_row.get(col)) != str(new_val):
+                    old_val = db_row.get(col)
+                    if not normalize_list_comparison(old_val, new_val):
                         updates.append(f"{col} = %s")
                         vals.append(new_val)
-                        cursor.execute("INSERT INTO eks_changes_history (cluster_name, field_name, old_value, new_value, changed_by) VALUES (%s, %s, %s, %s, %s)", (cluster_name, col, str(db_row.get(col)), str(new_val), get_cluster_changed_by(cluster_name, col)))
+                        cursor.execute("INSERT INTO eks_changes_history (cluster_name, field_name, old_value, new_value, changed_by) VALUES (%s, %s, %s, %s, %s)", (cluster_name, col, str(old_val), str(new_val), get_cluster_changed_by(cluster_name, col)))
                 
                 if updates:
                     cursor.execute(f"UPDATE eks SET {', '.join(updates)}, last_updated = NOW() WHERE clustername = %s", vals + [cluster_name])

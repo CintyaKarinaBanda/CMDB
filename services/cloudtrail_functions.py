@@ -11,9 +11,6 @@ def convert_to_local_time(utc_time):
     utc_timestamp = utc_time.timestamp()
     return datetime.fromtimestamp(utc_timestamp)
 
-def get_local_time():
-    return 'NOW()'
-
 IMPORTANT_EVENTS = {
     "StartInstances", "StopInstances", "RebootInstances", "TerminateInstances", "ModifyInstanceAttribute", "CreateTags", "DeleteTags", "RunInstances", "AttachVolume", "DetachVolume", "CreateVolume", "DeleteVolume", "ModifyVolume",
     "CreateDBInstance", "DeleteDBInstance", "ModifyDBInstance", "RebootDBInstance", "StartDBInstance", "StopDBInstance", "CreateDBSnapshot", "DeleteDBSnapshot", "RestoreDBInstanceFromDBSnapshot", "AddTagsToResource", "RemoveTagsFromResource",

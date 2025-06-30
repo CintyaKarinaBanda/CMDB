@@ -13,6 +13,13 @@ FIELD_EVENT_MAP = {
     "imagetags": ["PutImage", "BatchDeleteImage"]
 }
 
+def normalize_list_comparison(old_val, new_val):
+    """Normaliza listas para comparación, ignorando orden"""
+    if isinstance(new_val, list) and isinstance(old_val, (list, str)):
+        old_list = old_val if isinstance(old_val, list) else str(old_val).split(',') if old_val else []
+        return sorted([str(x).strip() for x in old_list]) == sorted([str(x).strip() for x in new_val])
+    return str(old_val) == str(new_val)
+
 def get_repository_changed_by(repository_name, field_name):
     conn = get_db_connection()
     if not conn:
@@ -91,27 +98,28 @@ def insert_or_update_ecr_data(ecr_data):
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM ecr")
         columns = [desc[0].lower() for desc in cursor.description]
-        existing = {row[columns.index("repositoryname")]: dict(zip(columns, row)) for row in cursor.fetchall()}
+        existing = {(row[columns.index("repositoryname")], row[columns.index("accountid")]): dict(zip(columns, row)) for row in cursor.fetchall()}
         
         for ecr in ecr_data:
             processed += 1
             repo_name = ecr["RepositoryName"]
             values = (ecr["AccountName"], ecr["AccountID"], ecr["RepositoryName"], ecr["Domain"], ecr["BusinessAppID"], ecr["RepositorySize"], ecr["ArtifactType"], ecr["ImageTags"])
             
-            if repo_name not in existing:
+            if (repo_name, ecr["AccountID"]) not in existing:
                 cursor.execute("INSERT INTO ecr (AccountName, AccountID, RepositoryName, Domain, BusinessAppID, RepositorySize, ArtifactType, ImageTags, last_updated) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())", values)
                 inserted += 1
             else:
-                db_row = existing[repo_name]
+                db_row = existing[(repo_name, ecr["AccountID"])]
                 updates = []
                 vals = []
                 campos = {"accountname": ecr["AccountName"], "accountid": ecr["AccountID"], "repositoryname": ecr["RepositoryName"], "domain": ecr["Domain"], "businessappid": ecr["BusinessAppID"], "repositorysize": ecr["RepositorySize"], "artifacttype": ecr["ArtifactType"], "imagetags": ecr["ImageTags"]}
                 
                 for col, new_val in campos.items():
-                    if str(db_row.get(col)) != str(new_val):
+                    old_val = db_row.get(col)
+                    if not normalize_list_comparison(old_val, new_val):
                         updates.append(f"{col} = %s")
                         vals.append(new_val)
-                        cursor.execute("INSERT INTO ecr_changes_history (repository_name, field_name, old_value, new_value, changed_by) VALUES (%s, %s, %s, %s, %s)", (repo_name, col, str(db_row.get(col)), str(new_val), get_repository_changed_by(repo_name, col)))
+                        cursor.execute("INSERT INTO ecr_changes_history (repository_name, field_name, old_value, new_value, changed_by) VALUES (%s, %s, %s, %s, %s)", (repo_name, col, str(old_val), str(new_val), get_repository_changed_by(repo_name, col)))
                 
                 if updates:
                     cursor.execute(f"UPDATE ecr SET {', '.join(updates)}, last_updated = NOW() WHERE repositoryname = %s", vals + [repo_name])

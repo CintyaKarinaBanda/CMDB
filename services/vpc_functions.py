@@ -177,7 +177,7 @@ def insert_or_update_vpc_data(vpc_data):
         # Obtener datos existentes
         cursor.execute("SELECT * FROM vpcs")
         columns = [desc[0].lower() for desc in cursor.description]
-        existing_data = {row[columns.index("vpc_id")]: dict(zip(columns, row)) for row in cursor.fetchall()}
+        existing_data = {(row[columns.index("vpc_id")], row[columns.index("account_id")]): dict(zip(columns, row)) for row in cursor.fetchall()}
 
         for vpc in vpc_data:
             vpc_id = vpc["VpcId"]
@@ -191,11 +191,11 @@ def insert_or_update_vpc_data(vpc_data):
                 vpc["RouteRules"], vpc["AccountName"], vpc["AccountID"]
             )
 
-            if vpc_id not in existing_data:
+            if (vpc_id, vpc["AccountID"]) not in existing_data:
                 cursor.execute(query_insert.replace('CURRENT_TIMESTAMP', 'NOW()'), insert_values)
                 inserted += 1
             else:
-                db_row = existing_data[vpc_id]
+                db_row = existing_data[(vpc_id, vpc["AccountID"])]
                 updates = []
                 values = []
 
@@ -221,18 +221,20 @@ def insert_or_update_vpc_data(vpc_data):
 
                 for col, new_val in campos.items():
                     old_val = db_row.get(col)
-                    if str(old_val) != str(new_val):
+                    # Normalizar listas para VPC
+                    if col in ['subnets', 'security_groups', 'network_acls', 'internet_gateways', 'vpc_endpoints', 'vpc_peerings', 'route_rules'] and isinstance(new_val, list):
+                        old_normalized = sorted([str(x) for x in (old_val if isinstance(old_val, list) else [])])
+                        new_normalized = sorted([str(x) for x in new_val])
+                        if old_normalized != new_normalized:
+                            updates.append(f"{col} = %s")
+                            values.append(new_val)
+                            changed_by = get_vpc_changed_by(vpc_id=vpc_id, field_name=col)
+                            cursor.execute(query_change_history, (vpc_id, col, str(old_val), str(new_val), changed_by))
+                    elif str(old_val) != str(new_val):
                         updates.append(f"{col} = %s")
                         values.append(new_val)
-                        changed_by = get_vpc_changed_by(
-                            vpc_id=vpc_id,
-                            field_name=col
-                        )
-                        
-                        cursor.execute(
-                            query_change_history,
-                            (vpc_id, col, str(old_val), str(new_val), changed_by)
-                        )
+                        changed_by = get_vpc_changed_by(vpc_id=vpc_id, field_name=col)
+                        cursor.execute(query_change_history, (vpc_id, col, str(old_val), str(new_val), changed_by))
 
                 updates.append("last_updated = NOW()")
 

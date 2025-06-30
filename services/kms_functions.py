@@ -13,6 +13,13 @@ FIELD_EVENT_MAP = {
     "tags": ["TagResource", "UntagResource"]
 }
 
+def normalize_list_comparison(old_val, new_val):
+    """Normaliza listas para comparación, ignorando orden"""
+    if isinstance(new_val, list) and isinstance(old_val, (list, str)):
+        old_list = old_val if isinstance(old_val, list) else str(old_val).split(',') if old_val else []
+        return sorted([str(x).strip() for x in old_list]) == sorted([str(x).strip() for x in new_val])
+    return str(old_val) == str(new_val)
+
 def get_key_changed_by(key_id, field_name):
     conn = get_db_connection()
     if not conn:
@@ -101,27 +108,28 @@ def insert_or_update_kms_data(kms_data):
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM kms")
         columns = [desc[0].lower() for desc in cursor.description]
-        existing = {row[columns.index("keyid")]: dict(zip(columns, row)) for row in cursor.fetchall()}
+        existing = {(row[columns.index("keyid")], row[columns.index("accountid")]): dict(zip(columns, row)) for row in cursor.fetchall()}
         
         for kms in kms_data:
             processed += 1
             key_id = kms["KeyID"]
             values = (kms["AccountName"], kms["AccountID"], kms["KeyID"], kms["KeyName"], kms["Estado"], kms["KeyType"], kms["KeySpec"], kms["Tags"])
             
-            if key_id not in existing:
+            if (key_id, kms["AccountID"]) not in existing:
                 cursor.execute("INSERT INTO kms (AccountName, AccountID, KeyID, KeyName, Estado, KeyType, KeySpec, Tags, last_updated) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())", values)
                 inserted += 1
             else:
-                db_row = existing[key_id]
+                db_row = existing[(key_id, kms["AccountID"])]
                 updates = []
                 vals = []
                 campos = {"accountname": kms["AccountName"], "accountid": kms["AccountID"], "keyid": kms["KeyID"], "keyname": kms["KeyName"], "estado": kms["Estado"], "keytype": kms["KeyType"], "keyspec": kms["KeySpec"], "tags": kms["Tags"]}
                 
                 for col, new_val in campos.items():
-                    if str(db_row.get(col)) != str(new_val):
+                    old_val = db_row.get(col)
+                    if not normalize_list_comparison(old_val, new_val):
                         updates.append(f"{col} = %s")
                         vals.append(new_val)
-                        cursor.execute("INSERT INTO kms_changes_history (key_id, field_name, old_value, new_value, changed_by) VALUES (%s, %s, %s, %s, %s)", (key_id, col, str(db_row.get(col)), str(new_val), get_key_changed_by(key_id, col)))
+                        cursor.execute("INSERT INTO kms_changes_history (key_id, field_name, old_value, new_value, changed_by) VALUES (%s, %s, %s, %s, %s)", (key_id, col, str(old_val), str(new_val), get_key_changed_by(key_id, col)))
                 
                 if updates:
                     cursor.execute(f"UPDATE kms SET {', '.join(updates)}, last_updated = NOW() WHERE keyid = %s", vals + [key_id])

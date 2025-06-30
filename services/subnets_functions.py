@@ -159,7 +159,7 @@ def insert_or_update_subnet_data(subnet_data):
 
         cursor.execute("SELECT * FROM subnets")
         columns = [desc[0].lower() for desc in cursor.description]
-        existing_data = {row[columns.index("subnetid")]: dict(zip(columns, row)) for row in cursor.fetchall()}
+        existing_data = {(row[columns.index("subnetid")], row[columns.index("accountid")]): dict(zip(columns, row)) for row in cursor.fetchall()}
 
         for subnet in subnet_data:
             subnet_id = subnet["SubnetId"]
@@ -173,11 +173,11 @@ def insert_or_update_subnet_data(subnet_data):
                 subnet["SubnetName"], subnet["AccountID"], subnet["AccountName"], subnet["Region"]
             )
 
-            if subnet_id not in existing_data:
+            if (subnet_id, subnet["AccountID"]) not in existing_data:
                 cursor.execute(query_insert.replace('CURRENT_TIMESTAMP', 'NOW()'), insert_values)
                 inserted += 1
             else:
-                db_row = existing_data[subnet_id]
+                db_row = existing_data[(subnet_id, subnet["AccountID"])]
                 updates = []
                 values = []
 
@@ -203,18 +203,20 @@ def insert_or_update_subnet_data(subnet_data):
 
                 for col, new_val in campos.items():
                     old_val = db_row.get(col)
-                    if str(old_val) != str(new_val):
+                    # Normalizar listas separadas por comas
+                    if col in ['securitygroups', 'vpceendpoints', 'vpcpeerings'] and ',' in str(new_val):
+                        old_normalized = sorted(str(old_val).split(',')) if old_val else []
+                        new_normalized = sorted(str(new_val).split(',')) if new_val else []
+                        if old_normalized != new_normalized:
+                            updates.append(f"{col} = %s")
+                            values.append(new_val)
+                            changed_by = get_subnet_changed_by(subnet_id=subnet_id, field_name=col)
+                            cursor.execute(query_change_history, (subnet_id, col, str(old_val), str(new_val), changed_by))
+                    elif str(old_val) != str(new_val):
                         updates.append(f"{col} = %s")
                         values.append(new_val)
-                        changed_by = get_subnet_changed_by(
-                            subnet_id=subnet_id,
-                            field_name=col
-                        )
-                        
-                        cursor.execute(
-                            query_change_history,
-                            (subnet_id, col, str(old_val), str(new_val), changed_by)
-                        )
+                        changed_by = get_subnet_changed_by(subnet_id=subnet_id, field_name=col)
+                        cursor.execute(query_change_history, (subnet_id, col, str(old_val), str(new_val), changed_by))
 
                 updates.append("last_updated = NOW()")
 

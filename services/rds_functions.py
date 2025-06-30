@@ -15,6 +15,13 @@ FIELD_EVENT_MAP = {
     "hasreplica": ["CreateDBInstanceReadReplica", "DeleteDBInstance"]
 }
 
+def normalize_list_comparison(old_val, new_val):
+    """Normaliza listas para comparación, ignorando orden"""
+    if isinstance(new_val, list) and isinstance(old_val, (list, str)):
+        old_list = old_val if isinstance(old_val, list) else str(old_val).split(',') if old_val else []
+        return sorted([str(x).strip() for x in old_list]) == sorted([str(x).strip() for x in new_val])
+    return str(old_val) == str(new_val)
+
 def get_instance_changed_by(instance_id, field_name):
     """Busca el usuario que cambió un campo específico"""
     conn = get_db_connection()
@@ -118,7 +125,7 @@ def insert_or_update_rds_data(rds_data):
 
         cursor.execute("SELECT * FROM rds")
         columns = [desc[0].lower() for desc in cursor.description]
-        existing_data = {row[columns.index("dbinstanceid")]: dict(zip(columns, row)) for row in cursor.fetchall()}
+        existing_data = {(row[columns.index("dbinstanceid")], row[columns.index("accountid")]): dict(zip(columns, row)) for row in cursor.fetchall()}
 
         for rds in rds_data:
             instance_id = rds["DbInstanceId"]
@@ -132,11 +139,11 @@ def insert_or_update_rds_data(rds_data):
                 rds["HasReplica"]
             )
 
-            if instance_id not in existing_data:
+            if (instance_id, rds["AccountID"]) not in existing_data:
                 cursor.execute(query_insert.replace('CURRENT_TIMESTAMP', 'NOW()'), insert_values)
                 inserted += 1
             else:
-                db_row = existing_data[instance_id]
+                db_row = existing_data[(instance_id, rds["AccountID"])]
                 updates = []
                 values = []
 
@@ -158,18 +165,11 @@ def insert_or_update_rds_data(rds_data):
 
                 for col, new_val in campos.items():
                     old_val = db_row.get(col)
-                    if str(old_val) != str(new_val):
+                    if not normalize_list_comparison(old_val, new_val):
                         updates.append(f"{col} = %s")
                         values.append(new_val)
-                        changed_by = get_instance_changed_by(
-                            instance_id=instance_id,
-                            field_name=col
-                        )
-                        
-                        cursor.execute(
-                            query_change_history,
-                            (instance_id, col, str(old_val), str(new_val), changed_by)
-                        )
+                        changed_by = get_instance_changed_by(instance_id=instance_id, field_name=col)
+                        cursor.execute(query_change_history, (instance_id, col, str(old_val), str(new_val), changed_by))
 
                 updates.append("last_updated = NOW()")
 
