@@ -38,14 +38,31 @@ def extract_job_data(job, glue_client, account_name, account_id, region):
     
     get_tag = lambda key: tags.get(key, "N/A")
     
-    # Determinar el tipo de job
-    job_type = "ETL"  # Por defecto
-    if job.get('Command', {}).get('Name') == 'glueetl':
+    # Determinar el tipo de job basado en el comando
+    command_name = job.get('Command', {}).get('Name', '')
+    if command_name == 'glueetl':
         job_type = "ETL"
-    elif job.get('Command', {}).get('Name') == 'pythonshell':
+    elif command_name == 'pythonshell':
         job_type = "Python Shell"
-    elif job.get('Command', {}).get('Name') == 'gluestreaming':
+    elif command_name == 'gluestreaming':
         job_type = "Streaming"
+    else:
+        job_type = "ETL"  # Por defecto
+    
+    # Determinar el creador basado en el origen del job
+    created_by = "N/A"
+    if 'CodeGenConfigurationNodes' in job:
+        created_by = "Visual"  # Creado con Glue Studio Visual
+    elif job.get('Command', {}).get('ScriptLocation', '').endswith('.ipynb'):
+        created_by = "Notebook"  # Creado con Notebook
+    elif job.get('Command', {}).get('ScriptLocation'):
+        created_by = "Script"  # Creado con Script
+    else:
+        # Intentar determinar por otros indicadores
+        if job.get('DefaultArguments', {}).get('--enable-glue-datacatalog') == 'true':
+            created_by = "Script"
+        else:
+            created_by = "Visual"  # Asumir Visual por defecto
     
     return {
         "AccountName": account_name[:255],
@@ -53,7 +70,7 @@ def extract_job_data(job, glue_client, account_name, account_id, region):
         "JobName": job["Name"][:255],
         "Type": job_type[:100],
         "Domain": job.get("CreatedOn"),  # Fecha de creación como dominio
-        "CreatedBy": job.get("Role", "N/A")[:255],  # Rol IAM como creador
+        "CreatedBy": created_by[:255],
         "GlueVersion": job.get("GlueVersion", "N/A")[:50],
         "Region": region[:50]
     }
