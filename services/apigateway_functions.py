@@ -30,41 +30,40 @@ def extract_api_data(api, apigateway_client, account_name, account_id, region):
     """Extrae datos relevantes de una API Gateway"""
     tags = {}
     try:
-        # Obtener tags de la API
         tags_response = apigateway_client.get_tags(resourceArn=f"arn:aws:apigateway:{region}::/restapis/{api['id']}")
         tags = tags_response.get('tags', {})
     except ClientError:
-        pass  # Ignorar si no se pueden obtener tags
+        pass
     
-    get_tag = lambda key: tags.get(key, "N/A")
+    endpoint_types = api.get("endpointConfiguration", {}).get("types", ["REGIONAL"])
+    endpoint_type = endpoint_types[0] if endpoint_types else "REGIONAL"
     
     return {
-        "AccountName": account_name,
-        "AccountID": account_id,
-        "ApiId": api["id"],
-        "Name": api.get("name", "N/A"),
-        "Description": api.get("description", "N/A"),
-        "Protocol": "REST",  # REST API por defecto
-        "EndpointType": api.get("endpointConfiguration", {}).get("types", ["REGIONAL"])[0],
+        "AccountName": account_name[:255],
+        "AccountID": account_id[:20],
+        "ApiId": api["id"][:255],
+        "Name": (api.get("name", "N/A") or "N/A")[:500],
+        "Description": (api.get("description", "N/A") or "N/A"),
+        "Protocol": "REST"[:100],
+        "EndpointType": endpoint_type[:255],
         "CreatedDate": api.get("createdDate"),
-        "Region": region
+        "Region": region[:50]
     }
 
 def extract_apiv2_data(api, apigatewayv2_client, account_name, account_id, region):
     """Extrae datos relevantes de una API Gateway v2 (HTTP/WebSocket)"""
     tags = api.get("Tags", {})
-    get_tag = lambda key: tags.get(key, "N/A")
     
     return {
-        "AccountName": account_name,
-        "AccountID": account_id,
-        "ApiId": api["ApiId"],
-        "Name": api.get("Name", "N/A"),
-        "Description": api.get("Description", "N/A"),
-        "Protocol": api.get("ProtocolType", "HTTP"),
-        "EndpointType": api.get("ApiEndpoint", "REGIONAL"),
+        "AccountName": account_name[:255],
+        "AccountID": account_id[:20],
+        "ApiId": api["ApiId"][:255],
+        "Name": (api.get("Name", "N/A") or "N/A")[:500],
+        "Description": (api.get("Description", "N/A") or "N/A"),
+        "Protocol": (api.get("ProtocolType", "HTTP") or "HTTP")[:100],
+        "EndpointType": (api.get("ApiEndpoint", "REGIONAL") or "REGIONAL")[:255],
         "CreatedDate": api.get("CreatedDate"),
-        "Region": region
+        "Region": region[:50]
     }
 
 def get_apigateway_apis(region, credentials, account_id, account_name):

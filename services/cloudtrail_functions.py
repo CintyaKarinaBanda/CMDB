@@ -21,10 +21,11 @@ IMPORTANT_EVENTS = {
     "CreateRepository", "DeleteRepository", "PutImage", "BatchDeleteImage", "PutRepositoryPolicy", "DeleteRepositoryPolicy",
     "CreateKey", "ScheduleKeyDeletion", "CancelKeyDeletion", "EnableKey", "DisableKey", "UpdateKeyDescription", "PutKeyPolicy", "CreateAlias", "DeleteAlias", "UpdateAlias",
     "CreateFunction", "DeleteFunction", "UpdateFunctionCode", "UpdateFunctionConfiguration", "PublishVersion", "CreateEventSourceMapping", "DeleteEventSourceMapping", "UpdateEventSourceMapping", "PutFunctionConcurrency", "DeleteFunctionConcurrency",
-    "CreateRestApi", "DeleteRestApi", "UpdateRestApi", "CreateDeployment", "DeleteDeployment", "CreateStage", "DeleteStage", "UpdateStage", "CreateApi", "DeleteApi", "UpdateApi", "CreateRoute", "DeleteRoute", "UpdateRoute", "CreateIntegration", "DeleteIntegration", "UpdateIntegration"
+    "CreateRestApi", "DeleteRestApi", "UpdateRestApi", "CreateDeployment", "DeleteDeployment", "CreateStage", "DeleteStage", "UpdateStage", "CreateApi", "DeleteApi", "UpdateApi", "CreateRoute", "DeleteRoute", "UpdateRoute", "CreateIntegration", "DeleteIntegration", "UpdateIntegration",
+    "CreateJob", "DeleteJob", "UpdateJob", "StartJobRun", "StopJobRun", "CreateCrawler", "DeleteCrawler", "UpdateCrawler", "StartCrawler", "StopCrawler", "CreateDatabase", "DeleteDatabase", "UpdateDatabase", "CreateTable", "DeleteTable", "UpdateTable"
 }
 
-EVENT_SOURCES = ["ec2.amazonaws.com", "rds.amazonaws.com", "redshift.amazonaws.com", "s3.amazonaws.com", "eks.amazonaws.com", "ecr.amazonaws.com", "kms.amazonaws.com", "lambda.amazonaws.com", "apigateway.amazonaws.com"]
+EVENT_SOURCES = ["ec2.amazonaws.com", "rds.amazonaws.com", "redshift.amazonaws.com", "s3.amazonaws.com", "eks.amazonaws.com", "ecr.amazonaws.com", "kms.amazonaws.com", "lambda.amazonaws.com", "apigateway.amazonaws.com", "glue.amazonaws.com"]
 SERVICE_FIELDS = {
     "ec2.amazonaws.com": ["instanceId", "volumeId", "vpcId", "subnetId", "groupId"],
     "rds.amazonaws.com": ["dBInstanceIdentifier", "dBClusterIdentifier"],
@@ -34,10 +35,11 @@ SERVICE_FIELDS = {
     "ecr.amazonaws.com": ["repositoryName"],
     "kms.amazonaws.com": ["keyId"],
     "lambda.amazonaws.com": ["functionName"],
-    "apigateway.amazonaws.com": ["restApiId", "apiId", "id"]
+    "apigateway.amazonaws.com": ["restApiId", "apiId", "id"],
+    "glue.amazonaws.com": ["jobName", "name", "crawlerName", "databaseName", "tableName"]
 }
 RESPONSE_FIELDS = ["instanceId", "dBInstanceIdentifier", "clusterIdentifier", "vpcId", "subnetId", "bucketName", "name", "keyId", "functionName"]
-RESOURCE_TYPES = {"ec2.amazonaws.com": "EC2", "rds.amazonaws.com": "RDS", "redshift.amazonaws.com": "Redshift", "s3.amazonaws.com": "S3", "eks.amazonaws.com": "EKS", "ecr.amazonaws.com": "ECR", "kms.amazonaws.com": "KMS", "lambda.amazonaws.com": "LAMBDA", "apigateway.amazonaws.com": "API-GATEWAY"}
+RESOURCE_TYPES = {"ec2.amazonaws.com": "EC2", "rds.amazonaws.com": "RDS", "redshift.amazonaws.com": "Redshift", "s3.amazonaws.com": "S3", "eks.amazonaws.com": "EKS", "ecr.amazonaws.com": "ECR", "kms.amazonaws.com": "KMS", "lambda.amazonaws.com": "LAMBDA", "apigateway.amazonaws.com": "API-GATEWAY", "glue.amazonaws.com": "GLUE"}
 
 def extract_resource_name(event_detail):
     req = event_detail.get("requestParameters", {})
