@@ -6,6 +6,8 @@ from services.vpc_functions import get_vpc_details, insert_or_update_vpc_data
 from services.subnets_functions import get_subnets_details, insert_or_update_subnet_data
 from services.apigateway_functions import get_apigateway_apis, insert_or_update_apigateway_data
 from services.glue_functions import get_glue_jobs, insert_or_update_glue_data
+from services.cloudformation_functions import get_cloudformation_stacks, insert_or_update_cloudformation_data
+from services.cloudtrail_trails_functions import get_cloudtrail_trails, insert_or_update_cloudtrail_trails_data
 from services.s3_functions import get_s3_buckets, insert_or_update_s3_data
 from services.eks_functions import get_eks_clusters, insert_or_update_eks_data
 from services.ecr_functions import get_ecr_repositories, insert_or_update_ecr_data
