@@ -1,7 +1,7 @@
 from botocore.exceptions import ClientError
 from datetime import datetime
 import time
-from services.utils import create_aws_client, get_db_connection
+from services.utils import create_aws_client, get_db_connection, log_change
 
 FIELD_EVENT_MAP = {
     "instancename": ["CreateTags", "DeleteTags"],
@@ -170,10 +170,7 @@ def insert_or_update_ec2_data(ec2_data):
         )
     """
 
-    query_change_history = """
-        INSERT INTO ec2_changes_history (instance_id, field_name, old_value, new_value, changed_by)
-        VALUES (%s, %s, %s, %s, %s)
-    """
+
 
     inserted = 0
     updated = 0
@@ -233,7 +230,7 @@ def insert_or_update_ec2_data(ec2_data):
                         updates.append(f"{col} = %s")
                         values.append(new_val)
                         changed_by = get_instance_changed_by(instance_id=instance_id, field_name=col)
-                        cursor.execute(query_change_history, (instance_id, col, str(old_val), str(new_val), changed_by))
+                        log_change('EC2', instance_id, col, old_val, new_val, changed_by, ec2["AccountID"], ec2["Region"])
 
                 updates.append("last_updated = NOW()")
 

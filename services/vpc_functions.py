@@ -1,7 +1,7 @@
 from botocore.exceptions import ClientError
 from datetime import datetime
 import time
-from services.utils import create_aws_client, get_db_connection
+from services.utils import create_aws_client, get_db_connection, log_change
 
 FIELD_EVENT_MAP = {
     "vpc_name": ["CreateTags", "DeleteTags"],
@@ -229,12 +229,12 @@ def insert_or_update_vpc_data(vpc_data):
                             updates.append(f"{col} = %s")
                             values.append(new_val)
                             changed_by = get_vpc_changed_by(vpc_id=vpc_id, field_name=col)
-                            cursor.execute(query_change_history, (vpc_id, col, str(old_val), str(new_val), changed_by))
+                            log_change('VPC', vpc_id, col, old_val, new_val, changed_by, vpc["AccountID"], vpc["Region"])
                     elif str(old_val) != str(new_val):
                         updates.append(f"{col} = %s")
                         values.append(new_val)
                         changed_by = get_vpc_changed_by(vpc_id=vpc_id, field_name=col)
-                        cursor.execute(query_change_history, (vpc_id, col, str(old_val), str(new_val), changed_by))
+                        log_change('VPC', vpc_id, col, old_val, new_val, changed_by, vpc["AccountID"], vpc["Region"])
 
                 updates.append("last_updated = NOW()")
 

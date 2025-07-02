@@ -1,7 +1,7 @@
 from botocore.exceptions import ClientError
 from datetime import datetime
 import time
-from services.utils import create_aws_client, get_db_connection
+from services.utils import create_aws_client, get_db_connection, log_change
 
 FIELD_EVENT_MAP = {
     "vpcname": ["CreateTags", "DeleteTags"],
@@ -211,12 +211,12 @@ def insert_or_update_subnet_data(subnet_data):
                             updates.append(f"{col} = %s")
                             values.append(new_val)
                             changed_by = get_subnet_changed_by(subnet_id=subnet_id, field_name=col)
-                            cursor.execute(query_change_history, (subnet_id, col, str(old_val), str(new_val), changed_by))
+                            log_change('SUBNET', subnet_id, col, old_val, new_val, changed_by, subnet["AccountID"], subnet["Region"])
                     elif str(old_val) != str(new_val):
                         updates.append(f"{col} = %s")
                         values.append(new_val)
                         changed_by = get_subnet_changed_by(subnet_id=subnet_id, field_name=col)
-                        cursor.execute(query_change_history, (subnet_id, col, str(old_val), str(new_val), changed_by))
+                        log_change('SUBNET', subnet_id, col, old_val, new_val, changed_by, subnet["AccountID"], subnet["Region"])
 
                 updates.append("last_updated = NOW()")
 
