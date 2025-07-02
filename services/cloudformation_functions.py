@@ -35,21 +35,14 @@ def extract_stack_data(stack, cloudformation_client, account_name, account_id, r
     capabilities = stack.get("Capabilities", [])
     capabilities_str = ", ".join(capabilities) if capabilities else "N/A"
     
-    # Determinar si tiene rollback habilitado
-    rollback_config = stack.get("RollbackConfiguration", {})
-    rollback_enabled = "Yes" if rollback_config.get("RollbackTriggers") else "No"
-    
     return {
         "AccountName": account_name[:255],
         "AccountID": account_id[:20],
         "StackName": stack["StackName"][:255],
         "StackStatus": stack.get("StackStatus", "N/A")[:50],
         "CreationTime": stack.get("CreationTime"),
-        "LastUpdatedTime": stack.get("LastUpdatedTime"),
         "Description": (stack.get("Description", "N/A") or "N/A")[:500],
         "Capabilities": capabilities_str[:255],
-        "RollbackEnabled": rollback_enabled[:10],
-        "DriftStatus": stack.get("DriftInformation", {}).get("StackDriftStatus", "N/A")[:50],
         "Region": region[:50]
     }
 
@@ -89,10 +82,9 @@ def insert_or_update_cloudformation_data(cloudformation_data):
     query_insert = """
         INSERT INTO cloudformation (
             account_name, account_id, stack_name, stack_status, creation_time,
-            last_updated_time, description, capabilities, rollback_enabled,
-            drift_status, region, last_updated
+            description, capabilities, region, last_updated
         ) VALUES (
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
+            %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
         )
     """
 
@@ -119,9 +111,8 @@ def insert_or_update_cloudformation_data(cloudformation_data):
 
             insert_values = (
                 stack["AccountName"], stack["AccountID"], stack["StackName"],
-                stack["StackStatus"], stack["CreationTime"], stack["LastUpdatedTime"],
-                stack["Description"], stack["Capabilities"], stack["RollbackEnabled"],
-                stack["DriftStatus"], stack["Region"]
+                stack["StackStatus"], stack["CreationTime"],
+                stack["Description"], stack["Capabilities"], stack["Region"]
             )
 
             if stack_name not in existing_data:
@@ -138,11 +129,8 @@ def insert_or_update_cloudformation_data(cloudformation_data):
                     "stack_name": stack["StackName"],
                     "stack_status": stack["StackStatus"],
                     "creation_time": stack["CreationTime"],
-                    "last_updated_time": stack["LastUpdatedTime"],
                     "description": stack["Description"],
                     "capabilities": stack["Capabilities"],
-                    "rollback_enabled": stack["RollbackEnabled"],
-                    "drift_status": stack["DriftStatus"],
                     "region": stack["Region"]
                 }
 

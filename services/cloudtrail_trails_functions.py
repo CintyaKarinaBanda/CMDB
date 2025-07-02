@@ -40,14 +40,6 @@ def extract_trail_data(trail, cloudtrail_client, account_name, account_id, regio
     
     get_tag = lambda key: next((t["Value"] for t in tags if t["Key"] == key), "N/A")
     
-    # Determinar el estado del trail
-    trail_status = "Unknown"
-    try:
-        status_response = cloudtrail_client.get_trail_status(Name=trail['Name'])
-        trail_status = "Active" if status_response.get('IsLogging', False) else "Inactive"
-    except ClientError:
-        pass
-    
     # Extraer información del bucket S3
     s3_bucket = trail.get('S3BucketName', 'N/A')
     s3_prefix = trail.get('S3KeyPrefix', '')
@@ -57,13 +49,10 @@ def extract_trail_data(trail, cloudtrail_client, account_name, account_id, regio
         "AccountName": account_name[:255],
         "AccountID": account_id[:20],
         "TrailName": trail["Name"][:255],
-        "Domain": trail.get("HomeRegion", region)[:50],  # Región principal del trail
-        "Status": trail_status[:20],
         "LogLocation": log_location[:500],
         "IsMultiRegion": "Yes" if trail.get("IsMultiRegionTrail", False) else "No",
         "IsOrganization": "Yes" if trail.get("IsOrganizationTrail", False) else "No",
         "IncludeGlobalEvents": "Yes" if trail.get("IncludeGlobalServiceEvents", True) else "No",
-        "KMSKeyId": (trail.get("KMSKeyId", "N/A") or "N/A")[:255],
         "Region": region[:50]
     }
 
@@ -100,11 +89,10 @@ def insert_or_update_cloudtrail_trails_data(cloudtrail_trails_data):
 
     query_insert = """
         INSERT INTO cloudtrail_trails (
-            account_name, account_id, trail_name, domain, status,
-            log_location, is_multi_region, is_organization, include_global_events,
-            kms_key_id, region, last_updated
+            account_name, account_id, trail_name, log_location, 
+            is_multi_region, is_organization, include_global_events, region, last_updated
         ) VALUES (
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
+            %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
         )
     """
 
@@ -131,9 +119,8 @@ def insert_or_update_cloudtrail_trails_data(cloudtrail_trails_data):
 
             insert_values = (
                 trail["AccountName"], trail["AccountID"], trail["TrailName"],
-                trail["Domain"], trail["Status"], trail["LogLocation"],
-                trail["IsMultiRegion"], trail["IsOrganization"], trail["IncludeGlobalEvents"],
-                trail["KMSKeyId"], trail["Region"]
+                trail["LogLocation"], trail["IsMultiRegion"], trail["IsOrganization"], 
+                trail["IncludeGlobalEvents"], trail["Region"]
             )
 
             if trail_name not in existing_data:
@@ -148,13 +135,10 @@ def insert_or_update_cloudtrail_trails_data(cloudtrail_trails_data):
                     "account_name": trail["AccountName"],
                     "account_id": trail["AccountID"],
                     "trail_name": trail["TrailName"],
-                    "domain": trail["Domain"],
-                    "status": trail["Status"],
                     "log_location": trail["LogLocation"],
                     "is_multi_region": trail["IsMultiRegion"],
                     "is_organization": trail["IsOrganization"],
                     "include_global_events": trail["IncludeGlobalEvents"],
-                    "kms_key_id": trail["KMSKeyId"],
                     "region": trail["Region"]
                 }
 
