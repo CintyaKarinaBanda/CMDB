@@ -1,7 +1,7 @@
 from botocore.exceptions import ClientError
 from datetime import datetime
 import time
-from services.utils import create_aws_client, get_db_connection
+from services.utils import create_aws_client, get_db_connection, log_change
 
 def get_local_time():
     return 'NOW()'
@@ -129,7 +129,7 @@ def insert_or_update_kms_data(kms_data):
                     if not normalize_list_comparison(old_val, new_val):
                         updates.append(f"{col} = %s")
                         vals.append(new_val)
-                        cursor.execute("INSERT INTO kms_changes_history (key_id, field_name, old_value, new_value, changed_by) VALUES (%s, %s, %s, %s, %s)", (key_id, col, str(old_val), str(new_val), get_key_changed_by(key_id, col)))
+                        log_change('KMS', key_id, col, old_val, new_val, get_key_changed_by(key_id, col), kms["AccountID"], 'N/A')
                 
                 if updates:
                     cursor.execute(f"UPDATE kms SET {', '.join(updates)}, last_updated = NOW() WHERE keyid = %s", vals + [key_id])

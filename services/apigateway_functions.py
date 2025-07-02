@@ -1,6 +1,6 @@
 from botocore.exceptions import ClientError
 from datetime import datetime
-from services.utils import create_aws_client, get_db_connection
+from services.utils import create_aws_client, get_db_connection, log_change
 
 def get_api_changed_by(api_id, update_date):
     """Busca el usuario que realizó el cambio más cercano a la fecha de actualización"""
@@ -119,10 +119,7 @@ def insert_or_update_apigateway_data(apigateway_data):
         )
     """
 
-    query_change_history = """
-        INSERT INTO apigateway_changes_history (api_id, field_name, old_value, new_value, changed_by)
-        VALUES (%s, %s, %s, %s, %s)
-    """
+
 
     inserted = 0
     updated = 0
@@ -176,10 +173,7 @@ def insert_or_update_apigateway_data(apigateway_data):
                             update_date=datetime.now()
                         )
                         
-                        cursor.execute(
-                            query_change_history,
-                            (api_id, col, str(old_val), str(new_val), changed_by)
-                        )
+                        log_change('API-GATEWAY', api_id, col, old_val, new_val, changed_by, api["AccountID"], api["Region"])
 
                 updates.append("last_updated = CURRENT_TIMESTAMP")
 

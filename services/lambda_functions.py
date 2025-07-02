@@ -1,7 +1,7 @@
 from botocore.exceptions import ClientError
 from datetime import datetime
 import time
-from services.utils import create_aws_client, get_db_connection
+from services.utils import create_aws_client, get_db_connection, log_change
 
 def get_local_time():
     return 'NOW()'
@@ -141,7 +141,7 @@ def insert_or_update_lambda_data(lambda_data):
                     if not normalize_list_comparison(old_val, new_val):
                         updates.append(f"{col} = %s")
                         vals.append(new_val)
-                        cursor.execute("INSERT INTO lambda_changes_history (function_name, field_name, old_value, new_value, changed_by) VALUES (%s, %s, %s, %s, %s)", (function_name, col, str(old_val), str(new_val), get_function_changed_by(function_name, col)))
+                        log_change('LAMBDA', function_name, col, old_val, new_val, get_function_changed_by(function_name, col), func["AccountID"], func["Region"])
                 
                 if updates:
                     cursor.execute(f"UPDATE lambda_functions SET {', '.join(updates)}, last_updated = NOW() WHERE functionname = %s", vals + [function_name])

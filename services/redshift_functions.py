@@ -1,7 +1,7 @@
 from botocore.exceptions import ClientError
 from datetime import datetime
 import time
-from services.utils import create_aws_client, get_db_connection
+from services.utils import create_aws_client, get_db_connection, log_change
 
 FIELD_EVENT_MAP = {
     "database_name": ["CreateCluster", "ModifyCluster"],
@@ -116,10 +116,7 @@ def insert_or_update_redshift_data(redshift_data):
         )
     """
 
-    query_change_history = """
-        INSERT INTO redshift_changes_history (cluster_id, field_name, old_value, new_value, changed_by)
-        VALUES (%s, %s, %s, %s, %s)
-    """
+
 
     inserted = 0
     updated = 0
@@ -176,7 +173,7 @@ def insert_or_update_redshift_data(redshift_data):
                         updates.append(f"{col} = %s")
                         values.append(new_val)
                         changed_by = get_cluster_changed_by(cluster_id=database_id, field_name=col)
-                        cursor.execute(query_change_history, (database_id, col, str(old_val), str(new_val), changed_by))
+                        log_change('REDSHIFT', database_id, col, old_val, new_val, changed_by, cluster["AccountID"], cluster["Region"])
 
                 updates.append("last_updated = NOW()")
 

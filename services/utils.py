@@ -88,3 +88,16 @@ def get_resource_changed_by(resource_id, resource_type, update_date):
     except Exception as e:
         print(f"[ERROR] Buscar changed_by para {resource_type} {resource_id}: {str(e)}")
         return "unknown"
+
+def log_change(service_type, resource_id, field_name, old_value, new_value, changed_by, account_id=None, region=None):
+    """Registra un cambio en la tabla unificada de historial."""
+    try:
+        execute_db_query("""
+            INSERT INTO changes_history 
+            (service_type, resource_id, field_name, old_value, new_value, changed_by, account_id, region)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """, (service_type, resource_id, field_name, str(old_value), str(new_value), changed_by, account_id, region))
+        return True
+    except Exception as e:
+        print(f"[ERROR] Log change: {str(e)}")
+        return False

@@ -1,6 +1,6 @@
 from botocore.exceptions import ClientError
 from datetime import datetime
-from services.utils import create_aws_client, get_db_connection
+from services.utils import create_aws_client, get_db_connection, log_change
 
 def get_stack_changed_by(stack_name, update_date):
     """Busca el usuario que realizó el cambio más cercano a la fecha de actualización"""
@@ -88,10 +88,7 @@ def insert_or_update_cloudformation_data(cloudformation_data):
         )
     """
 
-    query_change_history = """
-        INSERT INTO cloudformation_changes_history (stack_name, field_name, old_value, new_value, changed_by)
-        VALUES (%s, %s, %s, %s, %s)
-    """
+
 
     inserted = 0
     updated = 0
@@ -144,10 +141,7 @@ def insert_or_update_cloudformation_data(cloudformation_data):
                             update_date=datetime.now()
                         )
                         
-                        cursor.execute(
-                            query_change_history,
-                            (stack_name, col, str(old_val), str(new_val), changed_by)
-                        )
+                        log_change('CLOUDFORMATION', stack_name, col, old_val, new_val, changed_by, stack["AccountID"], stack["Region"])
 
                 updates.append("last_updated = CURRENT_TIMESTAMP")
 

@@ -4,12 +4,12 @@ from datetime import datetime, timedelta
 import time
 from services.utils import create_aws_client
 
-def convert_to_local_time(utc_time):
+def convert_to_utc_time(utc_time):
     if isinstance(utc_time, str):
+        # Remover 'Z' y parsear como UTC
         utc_time = datetime.fromisoformat(utc_time.replace('Z', '+00:00'))
-    # Convert UTC to local timestamp
-    utc_timestamp = utc_time.timestamp()
-    return datetime.fromtimestamp(utc_timestamp)
+    # Mantener en UTC sin conversión local
+    return utc_time.replace(tzinfo=None)
 
 IMPORTANT_EVENTS = {
     "StartInstances", "StopInstances", "RebootInstances", "TerminateInstances", "ModifyInstanceAttribute", "CreateTags", "DeleteTags", "RunInstances", "AttachVolume", "DetachVolume", "CreateVolume", "DeleteVolume", "ModifyVolume",
@@ -157,7 +157,7 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
         return {"error": "No se pudo crear el cliente de CloudTrail", "events": []}
     
     all_events = []
-    start_time = datetime.utcnow() - timedelta(days=1)
+    start_time = datetime.now() - timedelta(days=1)  # Usar hora local en lugar de UTC
     
     for source in EVENT_SOURCES:
         next_token = None
@@ -174,7 +174,7 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
                     if detail.get("eventName") in IMPORTANT_EVENTS:
                         basic_info = extract_basic_info(detail)
                         if is_valid_resource(basic_info["resource_name"], detail.get("eventSource", source)):
-                            all_events.append({"event_id": event.get("EventId"), "event_time": convert_to_local_time(event.get("EventTime")), **basic_info, "region": region, "event_source": detail.get("eventSource", source), "account_id": account_id, "account_name": account_name})
+                            all_events.append({"event_id": event.get("EventId"), "event_time": convert_to_utc_time(event.get("EventTime")), **basic_info, "region": region, "event_source": detail.get("eventSource", source), "account_id": account_id, "account_name": account_name})
                 except: continue
             
             if not next_token: break

@@ -1,6 +1,6 @@
 from botocore.exceptions import ClientError
 from datetime import datetime
-from services.utils import create_aws_client, get_db_connection
+from services.utils import create_aws_client, get_db_connection, log_change
 
 def get_trail_changed_by(trail_name, update_date):
     """Busca el usuario que realizó el cambio más cercano a la fecha de actualización"""
@@ -96,10 +96,7 @@ def insert_or_update_cloudtrail_trails_data(cloudtrail_trails_data):
         )
     """
 
-    query_change_history = """
-        INSERT INTO cloudtrail_trails_changes_history (trail_name, field_name, old_value, new_value, changed_by)
-        VALUES (%s, %s, %s, %s, %s)
-    """
+
 
     inserted = 0
     updated = 0
@@ -152,10 +149,7 @@ def insert_or_update_cloudtrail_trails_data(cloudtrail_trails_data):
                             update_date=datetime.now()
                         )
                         
-                        cursor.execute(
-                            query_change_history,
-                            (trail_name, col, str(old_val), str(new_val), changed_by)
-                        )
+                        log_change('CLOUDTRAIL', trail_name, col, old_val, new_val, changed_by, trail["AccountID"], trail["Region"])
 
                 updates.append("last_updated = CURRENT_TIMESTAMP")
 

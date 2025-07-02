@@ -150,5 +150,5 @@ if __name__ == "__main__":
                       choices=["ec2", "rds", "redshift", "vpc", "subnets", "cloudtrail", "s3", "eks", "ecr", "kms", "lambda", "apigateway", "glue", "cloudformation", "cloudtrail_trails", "all"],
                       help='Servicios a consultar')
     args = parser.parse_args()
-    services = ["ec2", "rds", "vpc", "subnets", "s3", "eks", "kms", "lambda"] if "all" in args.services else args.services
+    services = ["ec2", "rds", "redshift", "vpc", "subnets", "s3", "eks", "ecr", "kms", "lambda", "apigateway", "glue", "cloudformation", "cloudtrail_trails"] if "all" in args.services else args.services
     main(services)

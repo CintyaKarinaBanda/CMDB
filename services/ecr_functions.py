@@ -1,7 +1,7 @@
 from botocore.exceptions import ClientError
 from datetime import datetime
 import time
-from services.utils import create_aws_client, get_db_connection
+from services.utils import create_aws_client, get_db_connection, log_change
 
 def get_local_time():
     return 'NOW()'
@@ -119,7 +119,7 @@ def insert_or_update_ecr_data(ecr_data):
                     if not normalize_list_comparison(old_val, new_val):
                         updates.append(f"{col} = %s")
                         vals.append(new_val)
-                        cursor.execute("INSERT INTO ecr_changes_history (repository_name, field_name, old_value, new_value, changed_by) VALUES (%s, %s, %s, %s, %s)", (repo_name, col, str(old_val), str(new_val), get_repository_changed_by(repo_name, col)))
+                        log_change('ECR', repo_name, col, old_val, new_val, get_repository_changed_by(repo_name, col), ecr["AccountID"], 'N/A')
                 
                 if updates:
                     cursor.execute(f"UPDATE ecr SET {', '.join(updates)}, last_updated = NOW() WHERE repositoryname = %s", vals + [repo_name])

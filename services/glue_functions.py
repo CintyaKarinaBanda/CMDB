@@ -1,6 +1,6 @@
 from botocore.exceptions import ClientError
 from datetime import datetime
-from services.utils import create_aws_client, get_db_connection
+from services.utils import create_aws_client, get_db_connection, log_change
 
 def get_job_changed_by(job_name, update_date):
     """Busca el usuario que realizó el cambio más cercano a la fecha de actualización"""
@@ -115,10 +115,7 @@ def insert_or_update_glue_data(glue_data):
         )
     """
 
-    query_change_history = """
-        INSERT INTO glue_changes_history (job_name, field_name, old_value, new_value, changed_by)
-        VALUES (%s, %s, %s, %s, %s)
-    """
+
 
     inserted = 0
     updated = 0
@@ -171,10 +168,7 @@ def insert_or_update_glue_data(glue_data):
                             update_date=datetime.now()
                         )
                         
-                        cursor.execute(
-                            query_change_history,
-                            (job_name, col, str(old_val), str(new_val), changed_by)
-                        )
+                        log_change('GLUE', job_name, col, old_val, new_val, changed_by, job["AccountID"], job["Region"])
 
                 updates.append("last_updated = CURRENT_TIMESTAMP")
 

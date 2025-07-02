@@ -1,7 +1,7 @@
 from botocore.exceptions import ClientError
 from datetime import datetime
 import time
-from services.utils import create_aws_client, get_db_connection
+from services.utils import create_aws_client, get_db_connection, log_change
 
 def get_local_time():
     return 'NOW()'
@@ -115,7 +115,7 @@ def insert_or_update_eks_data(eks_data):
                     if not normalize_list_comparison(old_val, new_val):
                         updates.append(f"{col} = %s")
                         vals.append(new_val)
-                        cursor.execute("INSERT INTO eks_changes_history (cluster_name, field_name, old_value, new_value, changed_by) VALUES (%s, %s, %s, %s, %s)", (cluster_name, col, str(old_val), str(new_val), get_cluster_changed_by(cluster_name, col)))
+                        log_change('EKS', cluster_name, col, old_val, new_val, get_cluster_changed_by(cluster_name, col), eks["AccountID"], 'N/A')
                 
                 if updates:
                     cursor.execute(f"UPDATE eks SET {', '.join(updates)}, last_updated = NOW() WHERE clustername = %s", vals + [cluster_name])
