@@ -1,6 +1,5 @@
 from botocore.exceptions import ClientError
 from datetime import datetime
-import time
 from services.utils import create_aws_client, get_db_connection, log_change
 
 FIELD_EVENT_MAP = {
