@@ -25,10 +25,12 @@ IMPORTANT_EVENTS = {
     "CreateJob", "DeleteJob", "UpdateJob", "StartJobRun", "StopJobRun", "CreateCrawler", "DeleteCrawler", "UpdateCrawler", "StartCrawler", "StopCrawler", "CreateDatabase", "DeleteDatabase", "UpdateDatabase", "CreateTable", "DeleteTable", "UpdateTable",
     "CreateStack", "DeleteStack", "UpdateStack", "CreateChangeSet", "DeleteChangeSet", "ExecuteChangeSet", "CancelUpdateStack", "ContinueUpdateRollback", "UpdateTerminationProtection", "SetStackPolicy",
     "CreateTrail", "DeleteTrail", "UpdateTrail", "StartLogging", "StopLogging", "PutEventSelectors", "PutInsightSelectors",
-    "CreateAssociation", "DeleteAssociation", "UpdateAssociation", "CreateDocument", "DeleteDocument", "UpdateDocument", "SendCommand", "PutComplianceItems"
+    "CreateAssociation", "DeleteAssociation", "UpdateAssociation", "CreateDocument", "DeleteDocument", "UpdateDocument", "SendCommand", "PutComplianceItems",
+    "StartQueryExecution", "StopQueryExecution", "CreateWorkGroup", "DeleteWorkGroup", "UpdateWorkGroup", "CreateDataCatalog", "DeleteDataCatalog", "UpdateDataCatalog",
+    "CreateStateMachine", "DeleteStateMachine", "UpdateStateMachine", "StartExecution", "StopExecution", "CreateActivity", "DeleteActivity", "TagResource", "UntagResource"
 }
 
-EVENT_SOURCES = ["ec2.amazonaws.com", "rds.amazonaws.com", "redshift.amazonaws.com", "s3.amazonaws.com", "eks.amazonaws.com", "ecr.amazonaws.com", "kms.amazonaws.com", "lambda.amazonaws.com", "apigateway.amazonaws.com", "glue.amazonaws.com", "cloudformation.amazonaws.com", "ssm.amazonaws.com"]
+EVENT_SOURCES = ["ec2.amazonaws.com", "rds.amazonaws.com", "redshift.amazonaws.com", "s3.amazonaws.com", "eks.amazonaws.com", "ecr.amazonaws.com", "kms.amazonaws.com", "lambda.amazonaws.com", "apigateway.amazonaws.com", "glue.amazonaws.com", "cloudformation.amazonaws.com", "ssm.amazonaws.com", "athena.amazonaws.com", "states.amazonaws.com"]
 SERVICE_FIELDS = {
     "ec2.amazonaws.com": ["instanceId", "volumeId", "vpcId", "subnetId", "groupId"],
     "rds.amazonaws.com": ["dBInstanceIdentifier", "dBClusterIdentifier"],
@@ -42,10 +44,12 @@ SERVICE_FIELDS = {
     "glue.amazonaws.com": ["jobName", "name", "crawlerName", "databaseName", "tableName"],
     "cloudformation.amazonaws.com": ["stackName", "changeSetName"],
     "cloudtrail.amazonaws.com": ["trailName", "name"],
-    "ssm.amazonaws.com": ["associationId", "documentName", "instanceId"]
+    "ssm.amazonaws.com": ["associationId", "documentName", "instanceId"],
+    "athena.amazonaws.com": ["queryExecutionId", "workGroupName", "dataCatalogName"],
+    "states.amazonaws.com": ["stateMachineArn", "executionArn", "activityArn"]
 }
 RESPONSE_FIELDS = ["instanceId", "dBInstanceIdentifier", "clusterIdentifier", "vpcId", "subnetId", "bucketName", "name", "keyId", "functionName"]
-RESOURCE_TYPES = {"ec2.amazonaws.com": "EC2", "rds.amazonaws.com": "RDS", "redshift.amazonaws.com": "Redshift", "s3.amazonaws.com": "S3", "eks.amazonaws.com": "EKS", "ecr.amazonaws.com": "ECR", "kms.amazonaws.com": "KMS", "lambda.amazonaws.com": "LAMBDA", "apigateway.amazonaws.com": "API-GATEWAY", "glue.amazonaws.com": "GLUE", "cloudformation.amazonaws.com": "CLOUDFORMATION", "cloudtrail.amazonaws.com": "CLOUDTRAIL", "ssm.amazonaws.com": "SSM"}
+RESOURCE_TYPES = {"ec2.amazonaws.com": "EC2", "rds.amazonaws.com": "RDS", "redshift.amazonaws.com": "Redshift", "s3.amazonaws.com": "S3", "eks.amazonaws.com": "EKS", "ecr.amazonaws.com": "ECR", "kms.amazonaws.com": "KMS", "lambda.amazonaws.com": "LAMBDA", "apigateway.amazonaws.com": "API-GATEWAY", "glue.amazonaws.com": "GLUE", "cloudformation.amazonaws.com": "CLOUDFORMATION", "cloudtrail.amazonaws.com": "CLOUDTRAIL", "ssm.amazonaws.com": "SSM", "athena.amazonaws.com": "TAX", "states.amazonaws.com": "STEP-FUNCTIONS"}
 
 def extract_resource_name(event_detail):
     req = event_detail.get("requestParameters", {})

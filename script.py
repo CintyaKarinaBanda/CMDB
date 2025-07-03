@@ -23,7 +23,9 @@ from services import (
     get_glue_jobs, insert_or_update_glue_data,
     get_cloudformation_stacks, insert_or_update_cloudformation_data,
     get_cloudtrail_trails, insert_or_update_cloudtrail_trails_data,
-    get_ssm_associations, insert_or_update_ssm_data
+    get_ssm_associations, insert_or_update_ssm_data,
+    get_tax_queries, insert_or_update_tax_data,
+    get_stepfunctions_state_machines, insert_or_update_stepfunctions_data
 )
 
 def assume_role(role_arn):
@@ -59,7 +61,9 @@ def process_account_region(account_id, role_name, account_name, region, services
         "glue": lambda: get_glue_jobs(region, creds, account_id, account_name),
         "cloudformation": lambda: get_cloudformation_stacks(region, creds, account_id, account_name),
         "cloudtrail_trails": lambda: get_cloudtrail_trails(region, creds, account_id, account_name),
-        "ssm": lambda: get_ssm_associations(region, creds, account_id, account_name)
+        "ssm": lambda: get_ssm_associations(region, creds, account_id, account_name),
+        "tax": lambda: get_tax_queries(region, creds, account_id, account_name),
+        "stepfunctions": lambda: get_stepfunctions_state_machines(region, creds, account_id, account_name)
     }
 
     result = {"account_id": account_id, "region": region, "credentials": creds}
@@ -120,7 +124,9 @@ def main(services):
         "glue": insert_or_update_glue_data,
         "cloudformation": insert_or_update_cloudformation_data,
         "cloudtrail_trails": insert_or_update_cloudtrail_trails_data,
-        "ssm": insert_or_update_ssm_data
+        "ssm": insert_or_update_ssm_data,
+        "tax": insert_or_update_tax_data,
+        "stepfunctions": insert_or_update_stepfunctions_data
     }
 
     for s in services:
@@ -150,8 +156,8 @@ def main(services):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Recolecta información de recursos AWS')
     parser.add_argument('--services', nargs='+', default=["ec2", "cloudtrail"],
-                      choices=["ec2", "rds", "redshift", "vpc", "subnets", "cloudtrail", "s3", "eks", "ecr", "kms", "lambda", "apigateway", "glue", "cloudformation", "cloudtrail_trails", "ssm", "all"],
+                      choices=["ec2", "rds", "redshift", "vpc", "subnets", "cloudtrail", "s3", "eks", "ecr", "kms", "lambda", "apigateway", "glue", "cloudformation", "cloudtrail_trails", "ssm", "tax", "stepfunctions", "all"],
                       help='Servicios a consultar')
     args = parser.parse_args()
-    services = ["ec2", "rds", "redshift", "vpc", "subnets", "s3", "eks", "ecr", "kms", "lambda", "apigateway", "glue", "cloudformation", "cloudtrail_trails"] if "all" in args.services else args.services
+    services = ["ec2", "rds", "redshift", "vpc", "subnets", "s3", "eks", "ecr", "kms", "lambda", "apigateway", "glue", "cloudformation", "cloudtrail_trails", "ssm", "tax", "stepfunctions",] if "all" in args.services else args.services
     main(services)

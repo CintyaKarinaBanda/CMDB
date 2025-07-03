@@ -21,7 +21,7 @@ def get_job_changed_by(job_name, update_date):
                 return result[0]
             return "unknown"
     except Exception as e:
-        print(f"[ERROR] changed_by: {job_name} - {str(e)}")
+        pass
         return "unknown"
     finally:
         conn.close()
@@ -90,11 +90,10 @@ def get_glue_jobs(region, credentials, account_id, account_name):
                 info = extract_job_data(job, glue_client, account_name, account_id, region)
                 jobs_info.append(info)
         
-        if jobs_info:
-            print(f"INFO: Glue en {region}: {len(jobs_info)} jobs encontrados")
+
         return jobs_info
     except ClientError as e:
-        print(f"[ERROR] Glue: {region}/{account_id} - {str(e)}")
+        pass
         return []
 
 def insert_or_update_glue_data(glue_data):
@@ -187,7 +186,7 @@ def insert_or_update_glue_data(glue_data):
 
     except Exception as e:
         conn.rollback()
-        print(f"[ERROR] DB: glue_data - {str(e)}")
+        pass
         return {"error": str(e), "processed": 0, "inserted": 0, "updated": 0}
     finally:
         conn.close()

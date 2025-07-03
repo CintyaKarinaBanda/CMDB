@@ -21,7 +21,7 @@ def get_trail_changed_by(trail_name, update_date):
                 return result[0]
             return "unknown"
     except Exception as e:
-        print(f"[ERROR] changed_by: {trail_name} - {str(e)}")
+        pass
         return "unknown"
     finally:
         conn.close()
@@ -71,11 +71,10 @@ def get_cloudtrail_trails(region, credentials, account_id, account_name):
             info = extract_trail_data(trail, cloudtrail_client, account_name, account_id, region)
             trails_info.append(info)
         
-        if trails_info:
-            print(f"INFO: CloudTrail Trails en {region}: {len(trails_info)} trails encontrados")
+
         return trails_info
     except ClientError as e:
-        print(f"[ERROR] CloudTrail Trails: {region}/{account_id} - {str(e)}")
+        pass
         return []
 
 def insert_or_update_cloudtrail_trails_data(cloudtrail_trails_data):
@@ -168,7 +167,7 @@ def insert_or_update_cloudtrail_trails_data(cloudtrail_trails_data):
 
     except Exception as e:
         conn.rollback()
-        print(f"[ERROR] DB: cloudtrail_trails_data - {str(e)}")
+        pass
         return {"error": str(e), "processed": 0, "inserted": 0, "updated": 0}
     finally:
         conn.close()

@@ -21,7 +21,7 @@ def get_api_changed_by(api_id, update_date):
                 return result[0]
             return "unknown"
     except Exception as e:
-        print(f"[ERROR] changed_by: {api_id} - {str(e)}")
+        pass
         return "unknown"
     finally:
         conn.close()
@@ -84,7 +84,7 @@ def get_apigateway_apis(region, credentials, account_id, account_name):
                     info = extract_api_data(api, apigateway_client, account_name, account_id, region)
                     apis_info.append(info)
         except ClientError as e:
-            print(f"[ERROR] API Gateway REST: {region}/{account_id} - {str(e)}")
+            pass
     
     # Obtener HTTP/WebSocket APIs (v2)
     if apigatewayv2_client:
@@ -95,10 +95,9 @@ def get_apigateway_apis(region, credentials, account_id, account_name):
                     info = extract_apiv2_data(api, apigatewayv2_client, account_name, account_id, region)
                     apis_info.append(info)
         except ClientError as e:
-            print(f"[ERROR] API Gateway v2: {region}/{account_id} - {str(e)}")
+            pass
     
-    if apis_info:
-        print(f"INFO: API Gateway en {region}: {len(apis_info)} APIs encontradas")
+
     return apis_info
 
 def insert_or_update_apigateway_data(apigateway_data):
@@ -192,7 +191,7 @@ def insert_or_update_apigateway_data(apigateway_data):
 
     except Exception as e:
         conn.rollback()
-        print(f"[ERROR] DB: apigateway_data - {str(e)}")
+        pass
         return {"error": str(e), "processed": 0, "inserted": 0, "updated": 0}
     finally:
         conn.close()

@@ -21,7 +21,7 @@ def get_stack_changed_by(stack_name, update_date):
                 return result[0]
             return "unknown"
     except Exception as e:
-        print(f"[ERROR] changed_by: {stack_name} - {str(e)}")
+        pass
         return "unknown"
     finally:
         conn.close()
@@ -63,11 +63,10 @@ def get_cloudformation_stacks(region, credentials, account_id, account_name):
                     info = extract_stack_data(stack, cloudformation_client, account_name, account_id, region)
                     stacks_info.append(info)
         
-        if stacks_info:
-            print(f"INFO: CloudFormation en {region}: {len(stacks_info)} stacks encontrados")
+
         return stacks_info
     except ClientError as e:
-        print(f"[ERROR] CloudFormation: {region}/{account_id} - {str(e)}")
+        pass
         return []
 
 def insert_or_update_cloudformation_data(cloudformation_data):
@@ -160,7 +159,7 @@ def insert_or_update_cloudformation_data(cloudformation_data):
 
     except Exception as e:
         conn.rollback()
-        print(f"[ERROR] DB: cloudformation_data - {str(e)}")
+        pass
         return {"error": str(e), "processed": 0, "inserted": 0, "updated": 0}
     finally:
         conn.close()
