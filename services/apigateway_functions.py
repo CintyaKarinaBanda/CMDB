@@ -162,16 +162,24 @@ def insert_or_update_apigateway_data(apigateway_data):
                     "region": api["Region"]
                 }
 
+                # Verificar si cambió el account_id o api_id (campos de identificación)
+                if (str(db_row.get('account_id')) != str(api["AccountID"]) or 
+                    str(db_row.get('api_id')) != str(api["ApiId"])):
+                    # Si cambió la identificación, insertar como nuevo registro
+                    cursor.execute(query_insert, insert_values)
+                    inserted += 1
+                    continue
+                
                 for col, new_val in campos.items():
+                    # Saltar campos de identificación para actualizaciones
+                    if col in ['account_id', 'api_id']:
+                        continue
+                    
                     old_val = db_row.get(col)
                     if str(old_val) != str(new_val):
                         updates.append(f"{col} = %s")
                         values.append(new_val)
-                        changed_by = get_api_changed_by(
-                            api_id=api_id,
-                            update_date=datetime.now()
-                        )
-                        
+                        changed_by = get_api_changed_by(api_id, datetime.now())
                         log_change('API-GATEWAY', api_id, col, old_val, new_val, changed_by, api["AccountID"], api["Region"])
 
                 updates.append("last_updated = CURRENT_TIMESTAMP")

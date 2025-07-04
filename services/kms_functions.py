@@ -124,7 +124,19 @@ def insert_or_update_kms_data(kms_data):
                 vals = []
                 campos = {"accountname": kms["AccountName"], "accountid": kms["AccountID"], "keyid": kms["KeyID"], "keyname": kms["KeyName"], "estado": kms["Estado"], "keytype": kms["KeyType"], "keyspec": kms["KeySpec"], "tags": kms["Tags"]}
                 
+                # Verificar si cambió el account_id o key_id (campos de identificación)
+                if (str(db_row.get('accountid')) != str(kms["AccountID"]) or 
+                    str(db_row.get('keyid')) != str(kms["KeyID"])):
+                    # Si cambió la identificación, insertar como nuevo registro
+                    cursor.execute("INSERT INTO kms (AccountName, AccountID, KeyID, KeyName, Estado, KeyType, KeySpec, Tags, last_updated) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())", values)
+                    inserted += 1
+                    continue
+                
                 for col, new_val in campos.items():
+                    # Saltar campos de identificación para actualizaciones
+                    if col in ['accountid', 'keyid']:
+                        continue
+                    
                     old_val = db_row.get(col)
                     if not normalize_list_comparison(old_val, new_val):
                         updates.append(f"{col} = %s")

@@ -157,16 +157,24 @@ def insert_or_update_glue_data(glue_data):
                     "region": job["Region"]
                 }
 
+                # Verificar si cambió el account_id o job_name (campos de identificación)
+                if (str(db_row.get('account_id')) != str(job["AccountID"]) or 
+                    str(db_row.get('job_name')) != str(job["JobName"])):
+                    # Si cambió la identificación, insertar como nuevo registro
+                    cursor.execute(query_insert, insert_values)
+                    inserted += 1
+                    continue
+                
                 for col, new_val in campos.items():
+                    # Saltar campos de identificación para actualizaciones
+                    if col in ['account_id', 'job_name']:
+                        continue
+                    
                     old_val = db_row.get(col)
                     if str(old_val) != str(new_val):
                         updates.append(f"{col} = %s")
                         values.append(new_val)
-                        changed_by = get_job_changed_by(
-                            job_name=job_name,
-                            update_date=datetime.now()
-                        )
-                        
+                        changed_by = get_job_changed_by(job_name, datetime.now())
                         log_change('GLUE', job_name, col, old_val, new_val, changed_by, job["AccountID"], job["Region"])
 
                 updates.append("last_updated = CURRENT_TIMESTAMP")

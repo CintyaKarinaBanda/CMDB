@@ -110,7 +110,19 @@ def insert_or_update_eks_data(eks_data):
                 vals = []
                 campos = {"accountname": eks["AccountName"], "accountid": eks["AccountID"], "clusterid": eks["ClusterID"], "clustername": eks["ClusterName"], "status": eks["Status"], "kubernetesversion": eks["KubernetesVersion"], "provider": eks["Provider"], "clustersecuritygroup": eks["ClusterSecurityGroup"], "supportperiod": eks["SupportPeriod"], "addons": eks["Addons"], "tags": eks["Tags"]}
                 
+                # Verificar si cambió el account_id o cluster_name (campos de identificación)
+                if (str(db_row.get('accountid')) != str(eks["AccountID"]) or 
+                    str(db_row.get('clustername')) != str(eks["ClusterName"])):
+                    # Si cambió la identificación, insertar como nuevo registro
+                    cursor.execute("INSERT INTO eks (AccountName, AccountID, ClusterID, ClusterName, Status, KubernetesVersion, Provider, ClusterSecurityGroup, SupportPeriod, Addons, Tags, last_updated) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())", values)
+                    inserted += 1
+                    continue
+                
                 for col, new_val in campos.items():
+                    # Saltar campos de identificación para actualizaciones
+                    if col in ['accountid', 'clustername']:
+                        continue
+                    
                     old_val = db_row.get(col)
                     if not normalize_list_comparison(old_val, new_val):
                         updates.append(f"{col} = %s")

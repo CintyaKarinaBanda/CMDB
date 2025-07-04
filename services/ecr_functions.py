@@ -114,7 +114,19 @@ def insert_or_update_ecr_data(ecr_data):
                 vals = []
                 campos = {"accountname": ecr["AccountName"], "accountid": ecr["AccountID"], "repositoryname": ecr["RepositoryName"], "domain": ecr["Domain"], "businessappid": ecr["BusinessAppID"], "repositorysize": ecr["RepositorySize"], "artifacttype": ecr["ArtifactType"], "imagetags": ecr["ImageTags"]}
                 
+                # Verificar si cambió el account_id o repository_name (campos de identificación)
+                if (str(db_row.get('accountid')) != str(ecr["AccountID"]) or 
+                    str(db_row.get('repositoryname')) != str(ecr["RepositoryName"])):
+                    # Si cambió la identificación, insertar como nuevo registro
+                    cursor.execute("INSERT INTO ecr (AccountName, AccountID, RepositoryName, Domain, BusinessAppID, RepositorySize, ArtifactType, ImageTags, last_updated) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())", values)
+                    inserted += 1
+                    continue
+                
                 for col, new_val in campos.items():
+                    # Saltar campos de identificación para actualizaciones
+                    if col in ['accountid', 'repositoryname']:
+                        continue
+                    
                     old_val = db_row.get(col)
                     if not normalize_list_comparison(old_val, new_val):
                         updates.append(f"{col} = %s")

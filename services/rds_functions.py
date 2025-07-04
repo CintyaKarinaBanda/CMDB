@@ -160,7 +160,19 @@ def insert_or_update_rds_data(rds_data):
                     "hasreplica": rds["HasReplica"]
                 }
 
+                # Verificar si cambió el account_id o dbinstanceid (campos de identificación)
+                if (str(db_row.get('account_id')) != str(rds["AccountID"]) or 
+                    str(db_row.get('dbinstanceid')) != str(rds["DbInstanceId"])):
+                    # Si cambió la identificación, insertar como nuevo registro
+                    cursor.execute(query_insert.replace('CURRENT_TIMESTAMP', 'NOW()'), insert_values)
+                    inserted += 1
+                    continue
+                
                 for col, new_val in campos.items():
+                    # Saltar campos de identificación para actualizaciones
+                    if col in ['account_id', 'dbinstanceid']:
+                        continue
+                    
                     old_val = db_row.get(col)
                     if not normalize_list_comparison(old_val, new_val):
                         updates.append(f"{col} = %s")

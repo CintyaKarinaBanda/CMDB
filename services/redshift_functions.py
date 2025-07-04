@@ -167,7 +167,19 @@ def insert_or_update_redshift_data(redshift_data):
                     "account_name": cluster["AccountName"]
                 }
 
+                # Verificar si cambió el account_id o database_id (campos de identificación)
+                if (str(db_row.get('account_id')) != str(cluster["AccountID"]) or 
+                    str(db_row.get('database_id')) != str(cluster["DatabaseId"])):
+                    # Si cambió la identificación, insertar como nuevo registro
+                    cursor.execute(query_insert.replace('CURRENT_TIMESTAMP', 'NOW()'), insert_values)
+                    inserted += 1
+                    continue
+                
                 for col, new_val in campos.items():
+                    # Saltar campos de identificación para actualizaciones
+                    if col in ['account_id', 'database_id']:
+                        continue
+                    
                     old_val = db_row.get(col)
                     if not normalize_list_comparison(old_val, new_val):
                         updates.append(f"{col} = %s")

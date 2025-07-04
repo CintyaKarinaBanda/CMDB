@@ -157,7 +157,7 @@ def insert_or_update_ec2_data(ec2_data):
     if not conn:
         return {"error": "DB connection failed", "processed": 0, "inserted": 0, "updated": 0}
 
-    query_insert = """
+    insert_sql = """
         INSERT INTO ec2 (
             AccountName, AccountID, InstanceID, InstanceName, InstanceType,
             State, Region, AvailabilityZone, VPC, Subnet, OSImageID,
@@ -165,90 +165,70 @@ def insert_or_update_ec2_data(ec2_data):
             PrivateIP, StorageVolumes, last_updated
         ) VALUES (
             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-            %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
+            %s, %s, %s, %s, %s, %s, %s, %s, NOW()
         )
     """
 
-
-
-    inserted = 0
-    updated = 0
-    processed = 0
+    inserted = updated = processed = 0
 
     try:
         cursor = conn.cursor()
 
+        # Cargar datos existentes: {instanceid: row_dict}
         cursor.execute("SELECT * FROM ec2")
-        columns = [desc[0].lower() for desc in cursor.description]
-        existing_data = {(row[columns.index("instanceid")], row[columns.index("accountid")]): dict(zip(columns, row)) for row in cursor.fetchall()}
+        cols = [col[0].lower() for col in cursor.description]
+        existing = {
+            row[cols.index("instanceid")]: dict(zip(cols, row))
+            for row in cursor.fetchall()
+        }
 
         for ec2 in ec2_data:
-            instance_id = ec2["InstanceID"]
             processed += 1
-
-            insert_values = (
-                ec2["AccountName"], ec2["AccountID"], ec2["InstanceID"], ec2["InstanceName"],
+            iid = ec2["InstanceID"]
+            insert_vals = (
+                ec2["AccountName"], ec2["AccountID"], iid, ec2["InstanceName"],
                 ec2["InstanceType"], ec2["State"], ec2["Region"], ec2["AvailabilityZone"],
                 ec2["VPC"], ec2["Subnet"], ec2["OSImageID"], ec2["OSDetails"],
                 ec2["IAMRole"], ec2["SecurityGroups"], ec2["KeyName"],
                 ec2["PublicIP"], ec2["PrivateIP"], ec2["StorageVolumes"]
             )
 
-            if (instance_id, ec2["AccountID"]) not in existing_data:
-                cursor.execute(query_insert.replace('CURRENT_TIMESTAMP', 'NOW()'), insert_values)
+            db_row = existing.get(iid)
+
+            # Si no existe o cambió AccountID/AccountName ➝ INSERT
+            if not db_row or \
+               db_row.get("accountid") != ec2["AccountID"] or \
+               db_row.get("accountname") != ec2["AccountName"]:
+                cursor.execute(insert_sql, insert_vals)
                 inserted += 1
-            else:
-                db_row = existing_data[(instance_id, ec2["AccountID"])]
-                updates = []
-                values = []
+                continue
 
-                campos = {
-                    "accountname": ec2["AccountName"],
-                    "accountid": ec2["AccountID"],
-                    "instanceid": ec2["InstanceID"],
-                    "instancename": ec2["InstanceName"],
-                    "instancetype": ec2["InstanceType"],
-                    "state": ec2["State"],
-                    "region": ec2["Region"],
-                    "availabilityzone": ec2["AvailabilityZone"],
-                    "vpc": ec2["VPC"],
-                    "subnet": ec2["Subnet"],
-                    "osimageid": ec2["OSImageID"],
-                    "osdetails": ec2["OSDetails"],
-                    "iamrole": ec2["IAMRole"],
-                    "securitygroups": ec2["SecurityGroups"],
-                    "keyname": ec2["KeyName"],
-                    "publicip": ec2["PublicIP"],
-                    "privateip": ec2["PrivateIP"],
-                    "storagevolumes": ec2["StorageVolumes"]
-                }
+            # UPDATE campos que cambiaron
+            updates, values = [], []
+            for col, new_val in ec2.items():
+                col_db = col.lower()
+                if col_db in ["accountid", "accountname", "instanceid"]:
+                    continue  
+                old_val = db_row.get(col_db)
+                if not normalize_list_comparison(old_val, new_val):
+                    updates.append(f"{col} = %s")
+                    values.append(new_val)
+                    changed_by = get_instance_changed_by(iid, col)
+                    log_change('EC2', iid, col, old_val, new_val, changed_by, ec2["AccountID"], ec2["Region"])
 
-                for col, new_val in campos.items():
-                    old_val = db_row.get(col)
-                    if not normalize_list_comparison(old_val, new_val):
-                        updates.append(f"{col} = %s")
-                        values.append(new_val)
-                        changed_by = get_instance_changed_by(instance_id=instance_id, field_name=col)
-                        log_change('EC2', instance_id, col, old_val, new_val, changed_by, ec2["AccountID"], ec2["Region"])
-
+            if updates:
                 updates.append("last_updated = NOW()")
-
-                if updates:
-                    update_query = f"UPDATE ec2 SET {', '.join(updates)} WHERE instanceid = %s"
-                    values.append(instance_id)
-                    cursor.execute(update_query, tuple(values))
-                    updated += 1
+                values.append(iid)
+                cursor.execute(f"""
+                    UPDATE ec2 SET {', '.join(updates)} WHERE instanceid = %s
+                """, tuple(values))
+                updated += 1
 
         conn.commit()
-        return {
-            "processed": processed,
-            "inserted": inserted,
-            "updated": updated
-        }
+        return {"processed": processed, "inserted": inserted, "updated": updated}
 
     except Exception as e:
         conn.rollback()
-        pass
         return {"error": str(e), "processed": 0, "inserted": 0, "updated": 0}
     finally:
         conn.close()

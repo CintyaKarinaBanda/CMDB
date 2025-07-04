@@ -26,11 +26,14 @@ IMPORTANT_EVENTS = {
     "CreateStack", "DeleteStack", "UpdateStack", "CreateChangeSet", "DeleteChangeSet", "ExecuteChangeSet", "CancelUpdateStack", "ContinueUpdateRollback", "UpdateTerminationProtection", "SetStackPolicy",
     "CreateTrail", "DeleteTrail", "UpdateTrail", "StartLogging", "StopLogging", "PutEventSelectors", "PutInsightSelectors",
     "CreateAssociation", "DeleteAssociation", "UpdateAssociation", "CreateDocument", "DeleteDocument", "UpdateDocument", "SendCommand", "PutComplianceItems",
-    "StartQueryExecution", "StopQueryExecution", "CreateWorkGroup", "DeleteWorkGroup", "UpdateWorkGroup", "CreateDataCatalog", "DeleteDataCatalog", "UpdateDataCatalog",
-    "CreateStateMachine", "DeleteStateMachine", "UpdateStateMachine", "StartExecution", "StopExecution", "CreateActivity", "DeleteActivity", "TagResource", "UntagResource"
+    "StartQueryExecution", "StopQueryExecution", "CreateWorkGroup", "DeleteWorkGroup", "UpdateWorkGroup", "CreateDataCatalog", "DeleteDataCatalog", "UpdateDataCatalog", "BatchCreateNamedQuery", "BatchDeleteNamedQuery",
+    "CreateStateMachine", "DeleteStateMachine", "UpdateStateMachine", "StartExecution", "StopExecution", "CreateActivity", "DeleteActivity", "TagResource", "UntagResource",
+    "CreateServer", "DeleteServer", "UpdateServer", "StartServer", "StopServer", "CreateUser", "DeleteUser", "UpdateUser",
+    "CreatePipeline", "DeletePipeline", "UpdatePipeline", "StartPipelineExecution", "StopPipelineExecution", "RetryStageExecution",
+    "RunJobFlow", "TerminateJobFlows", "ModifyInstanceGroups", "AddInstanceGroups", "SetTerminationProtection", "AddJobFlowSteps"
 }
 
-EVENT_SOURCES = ["ec2.amazonaws.com", "rds.amazonaws.com", "redshift.amazonaws.com", "s3.amazonaws.com", "eks.amazonaws.com", "ecr.amazonaws.com", "kms.amazonaws.com", "lambda.amazonaws.com", "apigateway.amazonaws.com", "glue.amazonaws.com", "cloudformation.amazonaws.com", "ssm.amazonaws.com", "athena.amazonaws.com", "states.amazonaws.com"]
+EVENT_SOURCES = ["ec2.amazonaws.com", "rds.amazonaws.com", "redshift.amazonaws.com", "s3.amazonaws.com", "eks.amazonaws.com", "ecr.amazonaws.com", "kms.amazonaws.com", "lambda.amazonaws.com", "apigateway.amazonaws.com", "glue.amazonaws.com", "cloudformation.amazonaws.com", "ssm.amazonaws.com", "athena.amazonaws.com", "states.amazonaws.com", "transfer.amazonaws.com", "codepipeline.amazonaws.com", "elasticmapreduce.amazonaws.com"]
 SERVICE_FIELDS = {
     "ec2.amazonaws.com": ["instanceId", "volumeId", "vpcId", "subnetId", "groupId"],
     "rds.amazonaws.com": ["dBInstanceIdentifier", "dBClusterIdentifier"],
@@ -46,10 +49,13 @@ SERVICE_FIELDS = {
     "cloudtrail.amazonaws.com": ["trailName", "name"],
     "ssm.amazonaws.com": ["associationId", "documentName", "instanceId"],
     "athena.amazonaws.com": ["queryExecutionId", "workGroupName", "dataCatalogName"],
-    "states.amazonaws.com": ["stateMachineArn", "executionArn", "activityArn"]
+    "states.amazonaws.com": ["stateMachineArn", "executionArn", "activityArn"],
+    "transfer.amazonaws.com": ["serverId", "userName", "workflowId"],
+    "codepipeline.amazonaws.com": ["pipelineName", "executionId", "stageName"],
+    "elasticmapreduce.amazonaws.com": ["clusterId", "jobFlowId", "stepId"]
 }
 RESPONSE_FIELDS = ["instanceId", "dBInstanceIdentifier", "clusterIdentifier", "vpcId", "subnetId", "bucketName", "name", "keyId", "functionName"]
-RESOURCE_TYPES = {"ec2.amazonaws.com": "EC2", "rds.amazonaws.com": "RDS", "redshift.amazonaws.com": "Redshift", "s3.amazonaws.com": "S3", "eks.amazonaws.com": "EKS", "ecr.amazonaws.com": "ECR", "kms.amazonaws.com": "KMS", "lambda.amazonaws.com": "LAMBDA", "apigateway.amazonaws.com": "API-GATEWAY", "glue.amazonaws.com": "GLUE", "cloudformation.amazonaws.com": "CLOUDFORMATION", "cloudtrail.amazonaws.com": "CLOUDTRAIL", "ssm.amazonaws.com": "SSM", "athena.amazonaws.com": "TAX", "states.amazonaws.com": "STEP-FUNCTIONS"}
+RESOURCE_TYPES = {"ec2.amazonaws.com": "EC2", "rds.amazonaws.com": "RDS", "redshift.amazonaws.com": "Redshift", "s3.amazonaws.com": "S3", "eks.amazonaws.com": "EKS", "ecr.amazonaws.com": "ECR", "kms.amazonaws.com": "KMS", "lambda.amazonaws.com": "LAMBDA", "apigateway.amazonaws.com": "API-GATEWAY", "glue.amazonaws.com": "GLUE", "cloudformation.amazonaws.com": "CLOUDFORMATION", "cloudtrail.amazonaws.com": "CLOUDTRAIL", "ssm.amazonaws.com": "SSM", "athena.amazonaws.com": "ATHENA", "states.amazonaws.com": "STEP-FUNCTIONS", "transfer.amazonaws.com": "TRANSFER-FAMILY", "codepipeline.amazonaws.com": "CODEPIPELINE", "elasticmapreduce.amazonaws.com": "EMR"}
 
 def extract_resource_name(event_detail):
     req = event_detail.get("requestParameters", {})

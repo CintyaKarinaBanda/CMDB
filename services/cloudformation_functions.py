@@ -130,16 +130,33 @@ def insert_or_update_cloudformation_data(cloudformation_data):
                     "region": stack["Region"]
                 }
 
+                # Verificar si cambió el account_id o stack_name (campos de identificación)
+                if (str(db_row.get('account_id')) != str(stack["AccountID"]) or 
+                    str(db_row.get('stack_name')) != str(stack["StackName"])):
+                    # Si cambió la identificación, insertar como nuevo registro
+                    cursor.execute(query_insert, insert_values)
+                    inserted += 1
+                    continue
+                
                 for col, new_val in campos.items():
+                    # Saltar campos de identificación para actualizaciones
+                    if col in ['account_id', 'stack_name']:
+                        continue
+                    
                     old_val = db_row.get(col)
-                    if str(old_val) != str(new_val):
+                    # Comparación mejorada para arrays
+                    if col == 'capabilities' and isinstance(new_val, str) and isinstance(old_val, str):
+                        old_caps = sorted([x.strip() for x in str(old_val).split(',') if x.strip()])
+                        new_caps = sorted([x.strip() for x in str(new_val).split(',') if x.strip()])
+                        if old_caps != new_caps:
+                            updates.append(f"{col} = %s")
+                            values.append(new_val)
+                            changed_by = get_stack_changed_by(stack_name, datetime.now())
+                            log_change('CLOUDFORMATION', stack_name, col, old_val, new_val, changed_by, stack["AccountID"], stack["Region"])
+                    elif str(old_val) != str(new_val):
                         updates.append(f"{col} = %s")
                         values.append(new_val)
-                        changed_by = get_stack_changed_by(
-                            stack_name=stack_name,
-                            update_date=datetime.now()
-                        )
-                        
+                        changed_by = get_stack_changed_by(stack_name, datetime.now())
                         log_change('CLOUDFORMATION', stack_name, col, old_val, new_val, changed_by, stack["AccountID"], stack["Region"])
 
                 updates.append("last_updated = CURRENT_TIMESTAMP")
