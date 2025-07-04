@@ -1,14 +1,10 @@
-# cloudtrail_simple.py
 import json
 from datetime import datetime, timedelta
-import time
 from services.utils import create_aws_client
 
 def convert_to_utc_time(utc_time):
     if isinstance(utc_time, str):
-        # Remover 'Z' y parsear como UTC
         utc_time = datetime.fromisoformat(utc_time.replace('Z', '+00:00'))
-    # Mantener en UTC sin conversión local
     return utc_time.replace(tzinfo=None)
 
 IMPORTANT_EVENTS = {
@@ -27,13 +23,14 @@ IMPORTANT_EVENTS = {
     "CreateTrail", "DeleteTrail", "UpdateTrail", "StartLogging", "StopLogging", "PutEventSelectors", "PutInsightSelectors",
     "CreateAssociation", "DeleteAssociation", "UpdateAssociation", "CreateDocument", "DeleteDocument", "UpdateDocument", "SendCommand", "PutComplianceItems",
     "StartQueryExecution", "StopQueryExecution", "CreateWorkGroup", "DeleteWorkGroup", "UpdateWorkGroup", "CreateDataCatalog", "DeleteDataCatalog", "UpdateDataCatalog", "BatchCreateNamedQuery", "BatchDeleteNamedQuery",
-    "CreateStateMachine", "DeleteStateMachine", "UpdateStateMachine", "StartExecution", "StopExecution", "CreateActivity", "DeleteActivity", "TagResource", "UntagResource",
+    "CreateStateMachine", "DeleteStateMachine", "UpdateStateMachine", "StartExecution", "StopExecution", "CreateActivity", "DeleteActivity",
     "CreateServer", "DeleteServer", "UpdateServer", "StartServer", "StopServer", "CreateUser", "DeleteUser", "UpdateUser",
     "CreatePipeline", "DeletePipeline", "UpdatePipeline", "StartPipelineExecution", "StopPipelineExecution", "RetryStageExecution",
     "RunJobFlow", "TerminateJobFlows", "ModifyInstanceGroups", "AddInstanceGroups", "SetTerminationProtection", "AddJobFlowSteps"
 }
 
 EVENT_SOURCES = ["ec2.amazonaws.com", "rds.amazonaws.com", "redshift.amazonaws.com", "s3.amazonaws.com", "eks.amazonaws.com", "ecr.amazonaws.com", "kms.amazonaws.com", "lambda.amazonaws.com", "apigateway.amazonaws.com", "glue.amazonaws.com", "cloudformation.amazonaws.com", "ssm.amazonaws.com", "athena.amazonaws.com", "states.amazonaws.com", "transfer.amazonaws.com", "codepipeline.amazonaws.com", "elasticmapreduce.amazonaws.com"]
+
 SERVICE_FIELDS = {
     "ec2.amazonaws.com": ["instanceId", "volumeId", "vpcId", "subnetId", "groupId"],
     "rds.amazonaws.com": ["dBInstanceIdentifier", "dBClusterIdentifier"],
@@ -54,7 +51,7 @@ SERVICE_FIELDS = {
     "codepipeline.amazonaws.com": ["pipelineName", "executionId", "stageName"],
     "elasticmapreduce.amazonaws.com": ["clusterId", "jobFlowId", "stepId"]
 }
-RESPONSE_FIELDS = ["instanceId", "dBInstanceIdentifier", "clusterIdentifier", "vpcId", "subnetId", "bucketName", "name", "keyId", "functionName"]
+
 RESOURCE_TYPES = {"ec2.amazonaws.com": "EC2", "rds.amazonaws.com": "RDS", "redshift.amazonaws.com": "Redshift", "s3.amazonaws.com": "S3", "eks.amazonaws.com": "EKS", "ecr.amazonaws.com": "ECR", "kms.amazonaws.com": "KMS", "lambda.amazonaws.com": "LAMBDA", "apigateway.amazonaws.com": "API-GATEWAY", "glue.amazonaws.com": "GLUE", "cloudformation.amazonaws.com": "CLOUDFORMATION", "cloudtrail.amazonaws.com": "CLOUDTRAIL", "ssm.amazonaws.com": "SSM", "athena.amazonaws.com": "ATHENA", "states.amazonaws.com": "STEP-FUNCTIONS", "transfer.amazonaws.com": "TRANSFER-FAMILY", "codepipeline.amazonaws.com": "CODEPIPELINE", "elasticmapreduce.amazonaws.com": "EMR"}
 
 def extract_resource_name(event_detail):
@@ -62,158 +59,161 @@ def extract_resource_name(event_detail):
     resp = event_detail.get("responseElements", {})
     event_source = event_detail.get("eventSource", "")
     
-    # Check resource sets first
+    # Check resource sets
     for set_name in ["resourcesSet", "instancesSet"]:
-        if set_name in req:
-            items = req[set_name].get("items", [])
-            if items:
-                return items[0].get("resourceId" if set_name == "resourcesSet" else "instanceId", "unknown")
+        if set_name in req and req[set_name].get("items"):
+            return req[set_name]["items"][0].get("resourceId" if set_name == "resourcesSet" else "instanceId", "unknown")
     
-    # Check service-specific fields
+    # Check service fields
     for field in SERVICE_FIELDS.get(event_source, []):
-        if field in req and req[field]:
-            return req[field]
+        if req.get(field): return req[field]
     
-    # Check response elements
-    for field in RESPONSE_FIELDS:
-        if field in resp and resp[field]:
-            return resp[field]
+    # Check response fields
+    for field in ["instanceId", "dBInstanceIdentifier", "clusterIdentifier", "vpcId", "subnetId", "bucketName", "name", "keyId", "functionName"]:
+        if resp.get(field): return resp[field]
     
     # Generic search
     for key, value in {**req, **resp}.items():
-        if isinstance(value, str) and value and (key.lower().endswith('id') or 'identifier' in key.lower() or key.lower().endswith('name')):
+        if isinstance(value, str) and value and (key.lower().endswith(('id', 'name')) or 'identifier' in key.lower()):
             if key not in ['requestId', 'eventId', 'eventName', 'userName', 'principalId']:
                 return value
     
     return "unknown"
 
 def is_valid_resource(resource_name, event_source):
-    return resource_name and resource_name != "unknown" and (resource_name.startswith(("i-", "vpc-", "subnet-", "vol-", "snap-", "igw-", "nat-", "rtb-")) or event_source in ["rds.amazonaws.com", "redshift.amazonaws.com", "s3.amazonaws.com", "eks.amazonaws.com", "ecr.amazonaws.com", "kms.amazonaws.com", "lambda.amazonaws.com"])
+    return (resource_name and resource_name != "unknown" and 
+            (resource_name.startswith(("i-", "vpc-", "subnet-", "vol-", "snap-", "igw-", "nat-", "rtb-")) or 
+             event_source in ["rds.amazonaws.com", "redshift.amazonaws.com", "s3.amazonaws.com", "eks.amazonaws.com", "ecr.amazonaws.com", "kms.amazonaws.com", "lambda.amazonaws.com"]))
 
 def extract_changes(event_detail):
     req = event_detail.get("requestParameters", {})
     event_name = event_detail.get("eventName", "")
-    event_source = event_detail.get("eventSource", "")
     changes = {}
     
-    # Common patterns
-    if event_name in ["CreateTags", "DeleteTags"] and "tagSet" in req:
-        tags = [f"{tag.get('key', '')}={tag.get('value', '')}" for tag in req["tagSet"].get("items", [])]
-        if tags: changes["tags"] = ", ".join(tags)
-    elif event_name in ["StartInstances", "StopInstances", "RebootInstances", "TerminateInstances"] and "instancesSet" in req:
-        instances = [item["instanceId"] for item in req["instancesSet"].get("items", []) if "instanceId" in item]
-        if instances: changes.update({"instances": ", ".join(instances), "action": event_name.replace("Instances", "").lower()})
-    elif event_name == "RunInstances":
-        for field in ["instanceType", "imageId", "subnetId", "minCount"]: 
-            if req.get(field): changes[field.replace("minCount", "instance_count")] = req[field]
-    elif event_name == "CreateDBInstance":
-        for field in ["dBInstanceClass", "engine", "engineVersion", "allocatedStorage"]: 
-            if req.get(field): changes[field.lower().replace("dbinstance", "db_instance")] = req[field]
-    elif event_name in ["CreateCluster", "DeleteCluster"] and event_source == "eks.amazonaws.com":
-        changes["cluster_name"] = req.get("name")
-        if event_name == "CreateCluster": changes.update({"kubernetes_version": req.get("version"), "role_arn": req.get("roleArn")})
-        else: changes["action"] = "delete"
-    elif event_name in ["CreateRepository", "DeleteRepository", "PutImage"]:
-        changes["repository_name"] = req.get("repositoryName")
-        changes["action"] = {"CreateRepository": "create", "DeleteRepository": "delete", "PutImage": "push"}.get(event_name, "")
-        if event_name == "PutImage": changes["image_tag"] = req.get("imageTag")
-    elif event_name in ["CreateKey", "ScheduleKeyDeletion", "EnableKey", "DisableKey"]:
-        changes["key_id"] = req.get("keyId")
-        changes["action"] = {"CreateKey": "create", "ScheduleKeyDeletion": "schedule_delete", "EnableKey": "enable", "DisableKey": "disable"}.get(event_name, "")
-    elif event_name == "UpdateKeyDescription":
-        changes["key_id"] = req.get("keyId")
-        changes["description"] = req.get("description")
-    elif event_name in ["CreateFunction", "DeleteFunction"]:
-        changes["function_name"] = req.get("functionName")
-        changes["action"] = {"CreateFunction": "create", "DeleteFunction": "delete"}.get(event_name, "")
-        if event_name == "CreateFunction": changes.update({"runtime": req.get("runtime"), "handler": req.get("handler"), "memory": req.get("memorySize")})
-    elif event_name == "UpdateFunctionConfiguration":
-        changes["function_name"] = req.get("functionName")
-        for field in ["runtime", "handler", "memorySize", "timeout", "description"]: 
-            if req.get(field): changes[field] = req[field]
-    elif event_name == "UpdateFunctionCode":
-        changes["function_name"] = req.get("functionName")
-        changes["action"] = "update_code"
-    elif event_name == "ModifyVpcAttribute":
-        changes["vpc_id"] = req.get("vpcId")
-        changes["attribute"] = req.get("attribute")
-        if "value" in req: changes["new_value"] = str(req["value"])
-        if "enableDnsHostnames" in req: changes["dns_hostnames"] = req["enableDnsHostnames"]["value"]
-        if "enableDnsSupport" in req: changes["dns_support"] = req["enableDnsSupport"]["value"]
-    elif event_name == "AttachVolume":
-        changes["volume_id"] = req.get("volumeId")
-        changes["instance_id"] = req.get("instanceId")
-        changes["device"] = req.get("device")
-        changes["action"] = "attach"
-    elif event_name == "DetachVolume":
-        changes["volume_id"] = req.get("volumeId")
-        changes["instance_id"] = req.get("instanceId")
-        changes["device"] = req.get("device")
-        changes["force"] = req.get("force", False)
-        changes["action"] = "detach"
+    # Pattern matching for common events
+    patterns = {
+        # Tags
+        ("CreateTags", "DeleteTags"): lambda: {"tags": ", ".join([f"{t.get('key','')}={t.get('value','')}" for t in req.get("tagSet", {}).get("items", [])])},
+        # Instance actions
+        ("StartInstances", "StopInstances", "RebootInstances", "TerminateInstances"): lambda: {"instances": ", ".join([i["instanceId"] for i in req.get("instancesSet", {}).get("items", [])]), "action": event_name.replace("Instances", "").lower()},
+        # Volume operations
+        ("AttachVolume", "DetachVolume"): lambda: {"action": event_name.lower(), "volume": req.get("volumeId"), "instance": req.get("instanceId")},
+        # Gateway operations
+        ("AttachInternetGateway", "DetachInternetGateway"): lambda: {"action": event_name.lower(), "gateway": req.get("internetGatewayId"), "vpc": req.get("vpcId")},
+        # Subnet operations
+        ("CreateSubnet", "DeleteSubnet"): lambda: {"action": event_name.lower(), "cidr": req.get("cidrBlock"), "vpc": req.get("vpcId")},
+        # VPC operations
+        ("CreateVpc", "DeleteVpc"): lambda: {"action": event_name.lower(), "cidr": req.get("cidrBlock")},
+        # Route operations
+        ("CreateRouteTable", "DeleteRouteTable"): lambda: {"action": event_name.lower(), "vpc": req.get("vpcId")},
+        ("CreateRoute", "DeleteRoute"): lambda: {"action": event_name.lower(), "destination": req.get("destinationCidrBlock"), "gateway": req.get("gatewayId")},
+        # RDS operations
+        ("RebootDBInstance", "StartDBInstance", "StopDBInstance"): lambda: {"action": event_name.lower().replace("dbinstance", ""), "instance": req.get("dBInstanceIdentifier")},
+        # S3 operations
+        ("CreateBucket", "DeleteBucket"): lambda: {"action": event_name.lower(), "bucket": req.get("bucketName")},
+        # KMS operations
+        ("CreateAlias", "DeleteAlias"): lambda: {"action": event_name.lower(), "alias": req.get("aliasName"), "key": req.get("targetKeyId")}
+    }
+    
+    # Check patterns
+    for events, func in patterns.items():
+        if event_name in events:
+            result = func()
+            if any(result.values()):  # Only add if has meaningful values
+                changes.update({k: v for k, v in result.items() if v})
+                break
+    
+    # Special cases
+    if not changes:
+        if event_name == "ModifyInstanceAttribute":
+            attrs = [f"{k}={req[k]}" for k in ["instanceType", "userData", "disableApiTermination"] if k in req]
+            if attrs: changes["attributes"] = ", ".join(attrs)
+        elif event_name == "ModifySubnetAttribute" and "mapPublicIpOnLaunch" in req:
+            changes["public_ip"] = str(req["mapPublicIpOnLaunch"])
+        elif event_name == "ModifyVpcAttribute":
+            attrs = [f"{k}={req[k]}" for k in ["enableDnsHostnames", "enableDnsSupport"] if k in req]
+            if attrs: changes["attributes"] = ", ".join(attrs)
+        elif event_name == "PutBucketTagging" and req.get("tagging", {}).get("tagSet"):
+            changes["tags"] = ", ".join([f"{t.get('key','')}={t.get('value','')}" for t in req["tagging"]["tagSet"]])
+        elif event_name == "PutBucketEncryption":
+            changes.update({"action": "enable_encryption", "encryption": "enabled"})
+        elif event_name == "PutBucketVersioning" and req.get("versioningConfiguration"):
+            changes["versioning"] = req["versioningConfiguration"].get("status", "").lower()
+        elif event_name == "BatchDeleteImage" and req.get("imageIds"):
+            changes["deleted_images"] = str(len(req["imageIds"]))
+        elif event_name == "UpdateClusterConfig" and req.get("update"):
+            changes.update({"action": "update_config", "fields": ", ".join(req["update"].keys())})
+    
+    # Fallback
+    if not changes:
+        changes["action"] = event_name.lower()
     
     return json.dumps(changes) if changes else None
 
-def extract_basic_info(event_detail):
-    user = event_detail.get("userIdentity", {})
-    return {
-        "event_name": event_detail.get("eventName", "unknown"),
-        "user_name": user.get("userName") or user.get("principalId", "unknown"),
-        "resource_name": extract_resource_name(event_detail),
-        "changes": extract_changes(event_detail)
-    }
-
 def get_all_cloudtrail_events(region, credentials, account_id, account_name):
-    client = create_aws_client("cloudtrail", region, credentials)
-    if not client:
-        return {"error": "No se pudo crear el cliente de CloudTrail", "events": []}
-    
-    all_events = []
-    start_time = datetime.now() - timedelta(days=1)  # Usar hora local en lugar de UTC
-    
-    for source in EVENT_SOURCES:
-        next_token = None
-        while True:
-            params = {"LookupAttributes": [{"AttributeKey": "EventSource", "AttributeValue": source}], "StartTime": start_time, "EndTime": datetime.utcnow(), "MaxResults": 50}
-            if next_token: params["NextToken"] = next_token
-            
-            response = client.lookup_events(**params)
-            next_token = response.get("NextToken")
-            
-            for event in response.get("Events", []):
-                try:
-                    detail = json.loads(event.get("CloudTrailEvent", "{}"))
-                    if detail.get("eventName") in IMPORTANT_EVENTS:
-                        basic_info = extract_basic_info(detail)
-                        if is_valid_resource(basic_info["resource_name"], detail.get("eventSource", source)):
-                            all_events.append({"event_id": event.get("EventId"), "event_time": convert_to_utc_time(event.get("EventTime")), **basic_info, "region": region, "event_source": detail.get("eventSource", source), "account_id": account_id, "account_name": account_name})
-                except: continue
-            
-            if not next_token: break
-    
-    return {"events": all_events}
+    cloudtrail_client = create_aws_client("cloudtrail", region, credentials)
+    if not cloudtrail_client:
+        return {"events": []}
+
+    try:
+        start_time = datetime.now() - timedelta(days=1)
+        events = []
+        
+        for page in cloudtrail_client.get_paginator('lookup_events').paginate(StartTime=start_time, EndTime=datetime.now(), MaxItems=1000):
+            for event in page.get('Events', []):
+                event_detail = json.loads(event.get('CloudTrailEvent', '{}'))
+                event_name = event_detail.get('eventName', '')
+                event_source = event_detail.get('eventSource', '')
+                
+                if event_name in IMPORTANT_EVENTS and event_source in EVENT_SOURCES:
+                    resource_name = extract_resource_name(event_detail)
+                    if is_valid_resource(resource_name, event_source):
+                        events.append({
+                            'event_id': event_detail.get('eventID', ''),
+                            'event_time': convert_to_utc_time(event_detail.get('eventTime')),
+                            'event_name': event_name,
+                            'event_source': event_source,
+                            'user_name': event_detail.get('userIdentity', {}).get('userName', 'unknown'),
+                            'resource_name': resource_name,
+                            'resource_type': RESOURCE_TYPES.get(event_source, 'UNKNOWN'),
+                            'region': event_detail.get('awsRegion', region),
+                            'changes': extract_changes(event_detail)
+                        })
+        
+        return {"events": events}
+    except:
+        return {"events": []}
 
 def insert_or_update_cloudtrail_events(events_data):
     if not events_data:
-        return {"processed": 0, "inserted": 0}
+        return {"processed": 0, "inserted": 0, "updated": 0}
     
     from services.utils import get_db_connection
     conn = get_db_connection()
     if not conn:
-        return {"error": "DB connection failed", "processed": 0, "inserted": 0}
+        return {"error": "DB connection failed", "processed": 0, "inserted": 0, "updated": 0}
     
     try:
         cursor = conn.cursor()
-        batch_data = [(event["event_id"], event["event_time"], event["event_name"], event["user_name"], event["resource_name"], RESOURCE_TYPES.get(event["event_source"], "Unknown"), event["region"], event["event_source"], event["account_id"], event["account_name"], event.get("changes")) for event in events_data]
+        inserted = 0
         
-        batch_data = [(event["event_id"], event["event_time"], event["event_name"], event["user_name"], event["resource_name"], RESOURCE_TYPES.get(event["event_source"], "Unknown"), event["region"], event["event_source"], event["account_id"], event["account_name"], event.get("changes")) for event in events_data]
-        cursor.executemany("INSERT INTO cloudtrail_events (event_id, event_time, event_name, user_name, resource_name, resource_type, region, event_source, account_id, account_name, changes, last_updated) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW()) ON CONFLICT (event_id) DO NOTHING", batch_data)
+        for event in events_data:
+            try:
+                cursor.execute("""
+                    INSERT INTO cloudtrail_events 
+                    (event_id, event_time, event_name, event_source, user_name, resource_name, resource_type, region, changes, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                    ON CONFLICT (event_id) DO NOTHING
+                """, (event['event_id'], event['event_time'], event['event_name'], event['event_source'], 
+                     event['user_name'], event['resource_name'], event['resource_type'], event['region'], event['changes']))
+                inserted += cursor.rowcount
+            except:
+                continue
         
-        inserted = cursor.rowcount
         conn.commit()
-        return {"processed": len(events_data), "inserted": inserted}
+        return {"processed": len(events_data), "inserted": inserted, "updated": 0}
     except Exception as e:
         conn.rollback()
-        return {"error": str(e), "processed": 0, "inserted": 0}
+        return {"error": str(e), "processed": 0, "inserted": 0, "updated": 0}
     finally:
         conn.close()
