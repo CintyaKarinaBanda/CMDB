@@ -184,30 +184,32 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
                 event_name = event_detail.get('eventName', '')
                 event_source = event_detail.get('eventSource', '')
                 
+                # Solo filtrar por eventos importantes, sin validar recursos
                 if event_name in IMPORTANT_EVENTS and event_source in EVENT_SOURCES:
                     filtered_events += 1
                     resource_name = extract_resource_name(event_detail)
-                    if is_valid_resource(resource_name, event_source):
-                        events.append({
-                            'event_id': event_detail.get('eventID', ''),
-                            'event_time': convert_to_utc_time(event_detail.get('eventTime')),
-                            'event_name': event_name,
-                            'event_source': event_source,
-                            'user_name': event_detail.get('userIdentity', {}).get('userName', 'unknown'),
-                            'resource_name': resource_name,
-                            'resource_type': RESOURCE_TYPES.get(event_source, 'UNKNOWN'),
-                            'region': event_detail.get('awsRegion', region),
-                            'changes': extract_changes(event_detail)
-                        })
+                    
+                    # Insertar TODOS los eventos importantes, sin filtro de recursos
+                    events.append({
+                        'event_id': event_detail.get('eventID', ''),
+                        'event_time': convert_to_utc_time(event_detail.get('eventTime')),
+                        'event_name': event_name,
+                        'event_source': event_source,
+                        'user_name': event_detail.get('userIdentity', {}).get('userName', 'unknown'),
+                        'resource_name': resource_name if resource_name != 'unknown' else event_name.lower(),
+                        'resource_type': RESOURCE_TYPES.get(event_source, 'UNKNOWN'),
+                        'region': event_detail.get('awsRegion', region),
+                        'changes': extract_changes(event_detail)
+                    })
             
             # Verificar si hay más páginas
             next_token = page.get('NextToken')
             if not next_token:
                 break
         
-        # Debug temporal
-        if region == "us-east-1" and account_name:
-            print(f"DEBUG CloudTrail {region}: {total_events} total, {filtered_events} filtrados, {len(events)} válidos")
+        # Debug temporal - mostrar para todas las regiones con eventos
+        if total_events > 0:
+            print(f"DEBUG CloudTrail {region}/{account_id}: {total_events} total, {filtered_events} importantes, {len(events)} insertados")
         
         return {"events": events}
     except Exception as e:
