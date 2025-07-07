@@ -161,7 +161,23 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
         total_events = 0
         filtered_events = 0
         
-        for page in cloudtrail_client.get_paginator('lookup_events').paginate(StartTime=start_time, EndTime=datetime.now(), MaxItems=1000):
+        # Obtener múltiples páginas manualmente
+        next_token = None
+        pages_processed = 0
+        max_pages = 20  # 20 páginas x 50 eventos = 1000 eventos máximo
+        
+        while pages_processed < max_pages:
+            params = {
+                'StartTime': start_time,
+                'EndTime': datetime.now(),
+                'MaxResults': 50
+            }
+            if next_token:
+                params['NextToken'] = next_token
+            
+            page = cloudtrail_client.lookup_events(**params)
+            pages_processed += 1
+            
             for event in page.get('Events', []):
                 total_events += 1
                 event_detail = json.loads(event.get('CloudTrailEvent', '{}'))
@@ -183,6 +199,11 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
                             'region': event_detail.get('awsRegion', region),
                             'changes': extract_changes(event_detail)
                         })
+            
+            # Verificar si hay más páginas
+            next_token = page.get('NextToken')
+            if not next_token:
+                break
         
         # Debug temporal
         if region == "us-east-1" and account_name:
