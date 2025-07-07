@@ -160,6 +160,9 @@ def main(services):
         if total_inserted or total_updated:
             status = f"{total_inserted} nuevos" if total_inserted and not total_updated else f"{total_updated} actualizados" if total_updated and not total_inserted else f"{total_inserted} nuevos, {total_updated} actualizados"
             messages.append(f"{s.upper()}: {status}")
+        elif s == "cloudtrail" and total_inserted == 0:
+            # Mostrar mensaje especial para CloudTrail sin eventos nuevos
+            messages.append("CLOUDTRAIL: 0 eventos nuevos")
 
     print(f"✅ Completado: {' | '.join(messages)} | ⏱️ {(datetime.now() - start).total_seconds():.0f}s")
     if errors:

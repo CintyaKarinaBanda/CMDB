@@ -212,9 +212,7 @@ def insert_or_update_cloudtrail_events(events_data):
         
         conn.commit()
         
-        # Log final solo si hay registros nuevos
-        if inserted > 0:
-            print(f"CloudTrail: {inserted} eventos nuevos registrados")
+        # No mostrar log aquí, se mostrará en el script principal
         
         return {"processed": len(events_data), "inserted": inserted, "updated": 0}
     except Exception as e:
