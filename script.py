@@ -143,7 +143,11 @@ def main(services):
 
     for s in services:
         entries = collected_data.get(s, [])
+        
         if not entries:
+            # Para CloudTrail, mostrar 0 eventos si no hay datos
+            if s == "cloudtrail":
+                messages.append("CLOUDTRAIL: 0 eventos nuevos")
             continue
         
         grouped = {}
