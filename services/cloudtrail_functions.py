@@ -158,14 +158,18 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
     try:
         start_time = datetime.now() - timedelta(days=1)
         events = []
+        total_events = 0
+        filtered_events = 0
         
         for page in cloudtrail_client.get_paginator('lookup_events').paginate(StartTime=start_time, EndTime=datetime.now(), MaxItems=1000):
             for event in page.get('Events', []):
+                total_events += 1
                 event_detail = json.loads(event.get('CloudTrailEvent', '{}'))
                 event_name = event_detail.get('eventName', '')
                 event_source = event_detail.get('eventSource', '')
                 
                 if event_name in IMPORTANT_EVENTS and event_source in EVENT_SOURCES:
+                    filtered_events += 1
                     resource_name = extract_resource_name(event_detail)
                     if is_valid_resource(resource_name, event_source):
                         events.append({
@@ -180,8 +184,13 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
                             'changes': extract_changes(event_detail)
                         })
         
+        # Debug temporal
+        if region == "us-east-1" and account_name:
+            print(f"DEBUG CloudTrail {region}: {total_events} total, {filtered_events} filtrados, {len(events)} válidos")
+        
         return {"events": events}
-    except:
+    except Exception as e:
+        print(f"DEBUG CloudTrail ERROR {region}: {str(e)}")
         return {"events": []}
 
 def insert_or_update_cloudtrail_events(events_data):
