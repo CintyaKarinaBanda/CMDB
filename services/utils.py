@@ -92,6 +92,10 @@ def get_resource_changed_by(resource_id, resource_type, update_date):
 def log_change(service_type, resource_id, field_name, old_value, new_value, changed_by, account_id=None, region=None):
     """Registra un cambio en la tabla unificada de historial."""
     try:
+        # Filtrar cambios irrelevantes
+        if not _is_significant_change(field_name, old_value, new_value):
+            return False
+            
         execute_db_query("""
             INSERT INTO changes_history 
             (service_type, resource_id, field_name, old_value, new_value, changed_by, account_id, region)
@@ -101,3 +105,51 @@ def log_change(service_type, resource_id, field_name, old_value, new_value, chan
     except Exception as e:
         print(f"[ERROR] Log change: {str(e)}")
         return False
+
+def _is_significant_change(field_name, old_value, new_value):
+    """Determina si un cambio es significativo y debe registrarse."""
+    old_str = str(old_value).strip() if old_value is not None else ""
+    new_str = str(new_value).strip() if new_value is not None else ""
+    
+    # Ignorar cambios vacíos o idénticos
+    if old_str == new_str:
+        return False
+    
+    # Ignorar campos de metadatos internos
+    ignore_fields = {
+        'last_updated', 'created_at', 'modified_at', 'updated_at',
+        'map-migrated', 'migration-id', 'aws-migration-project-id',
+        'requestid', 'eventid', 'principalid', 'sessioncontext'
+    }
+    
+    if field_name.lower() in ignore_fields:
+        return False
+    
+    # Ignorar cambios de timestamps mínimos (menos de 1 minuto)
+    if 'time' in field_name.lower() or 'date' in field_name.lower():
+        try:
+            from datetime import datetime
+            old_time = datetime.fromisoformat(old_str.replace('Z', '+00:00')) if old_str else None
+            new_time = datetime.fromisoformat(new_str.replace('Z', '+00:00')) if new_str else None
+            if old_time and new_time and abs((new_time - old_time).total_seconds()) < 60:
+                return False
+        except:
+            pass
+    
+    # Ignorar cambios de IDs de migración AWS
+    if (old_str.startswith('mig') and new_str.startswith('mig') and 
+        len(old_str) > 10 and len(new_str) > 10):
+        return False
+    
+    # Ignorar cambios de formato JSON idénticos
+    if old_str.startswith('{') and new_str.startswith('{'):
+        try:
+            import json
+            old_json = json.loads(old_str)
+            new_json = json.loads(new_str)
+            if old_json == new_json:
+                return False
+        except:
+            pass
+    
+    return True
