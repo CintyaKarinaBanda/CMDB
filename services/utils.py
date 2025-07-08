@@ -141,13 +141,60 @@ def _is_significant_change(field_name, old_value, new_value):
         len(old_str) > 10 and len(new_str) > 10):
         return False
     
-    # Ignorar cambios de formato JSON idénticos
+    # Ignorar cambios de formato entre dict/string que son idénticos
     if old_str.startswith('{') and new_str.startswith('{'):
         try:
             import json
             old_json = json.loads(old_str)
             new_json = json.loads(new_str)
             if old_json == new_json:
+                return False
+        except:
+            pass
+    
+    # Ignorar cambios entre dict y list que son equivalentes
+    try:
+        import json, ast
+        # Intentar evaluar como estructuras Python
+        old_eval = ast.literal_eval(old_str) if old_str else None
+        new_eval = ast.literal_eval(new_str) if new_str else None
+        if old_eval == new_eval:
+            return False
+    except:
+        pass
+    
+    # Ignorar cambios de orden en listas/arrays
+    if (old_str.startswith('[') and new_str.startswith('[')) or (old_str.startswith('{') and new_str.startswith('{'))::::
+        try:
+            import json
+            old_data = json.loads(old_str)
+            new_data = json.loads(new_str)
+            # Si son listas, comparar como sets (ignorar orden)
+            if isinstance(old_data, list) and isinstance(new_data, list):
+                if set(str(x) for x in old_data) == set(str(x) for x in new_data):
+                    return False
+            # Si son dicts, comparar directamente
+            elif isinstance(old_data, dict) and isinstance(new_data, dict):
+                if old_data == new_data:
+                    return False
+        except:
+            pass
+    
+    # Ignorar cambios de formato decimal (0.00 vs 0)
+    if field_name.lower() in ['execution_duration', 'compliance_percentage']:
+        try:
+            if float(old_str) == float(new_str):
+                return False
+        except:
+            pass
+    
+    # Ignorar cambios de formato de timezone
+    if '+00:00' in old_str or '+00:00' in new_str:
+        try:
+            from datetime import datetime
+            old_dt = datetime.fromisoformat(old_str.replace('Z', '+00:00'))
+            new_dt = datetime.fromisoformat(new_str.replace('Z', '+00:00'))
+            if old_dt == new_dt:
                 return False
         except:
             pass
