@@ -125,23 +125,7 @@ def _is_significant_change(field_name, old_value, new_value):
     if field_name.lower() in ignore_fields:
         return False
     
-    # Ignorar cambios de timestamps mínimos (menos de 1 minuto)
-    if 'time' in field_name.lower() or 'date' in field_name.lower():
-        try:
-            from datetime import datetime
-            old_time = datetime.fromisoformat(old_str.replace('Z', '+00:00')) if old_str else None
-            new_time = datetime.fromisoformat(new_str.replace('Z', '+00:00')) if new_str else None
-            if old_time and new_time and abs((new_time - old_time).total_seconds()) < 60:
-                return False
-        except:
-            pass
-    
-    # Ignorar cambios de IDs de migración AWS
-    if (old_str.startswith('mig') and new_str.startswith('mig') and 
-        len(old_str) > 10 and len(new_str) > 10):
-        return False
-    
-    # Ignorar cambios de formato entre dict/string que son idénticos
+    # Ignorar cambios de formato JSON idénticos
     if old_str.startswith('{') and new_str.startswith('{'):
         try:
             import json
@@ -152,49 +136,22 @@ def _is_significant_change(field_name, old_value, new_value):
         except:
             pass
     
-    # Ignorar cambios entre dict y list que son equivalentes
-    try:
-        import json, ast
-        # Intentar evaluar como estructuras Python
-        old_eval = ast.literal_eval(old_str) if old_str else None
-        new_eval = ast.literal_eval(new_str) if new_str else None
-        if old_eval == new_eval:
-            return False
-    except:
-        pass
-    
-    # Ignorar cambios de orden en listas/arrays
-    if (old_str.startswith('[') and new_str.startswith('[')) or (old_str.startswith('{') and new_str.startswith('{'))::::
+    # Ignorar cambios de orden en arrays
+    if old_str.startswith('[') and new_str.startswith('['):
         try:
             import json
             old_data = json.loads(old_str)
             new_data = json.loads(new_str)
-            # Si son listas, comparar como sets (ignorar orden)
             if isinstance(old_data, list) and isinstance(new_data, list):
                 if set(str(x) for x in old_data) == set(str(x) for x in new_data):
                     return False
-            # Si son dicts, comparar directamente
-            elif isinstance(old_data, dict) and isinstance(new_data, dict):
-                if old_data == new_data:
-                    return False
         except:
             pass
     
-    # Ignorar cambios de formato decimal (0.00 vs 0)
+    # Ignorar cambios de formato decimal
     if field_name.lower() in ['execution_duration', 'compliance_percentage']:
         try:
             if float(old_str) == float(new_str):
-                return False
-        except:
-            pass
-    
-    # Ignorar cambios de formato de timezone
-    if '+00:00' in old_str or '+00:00' in new_str:
-        try:
-            from datetime import datetime
-            old_dt = datetime.fromisoformat(old_str.replace('Z', '+00:00'))
-            new_dt = datetime.fromisoformat(new_str.replace('Z', '+00:00'))
-            if old_dt == new_dt:
                 return False
         except:
             pass
