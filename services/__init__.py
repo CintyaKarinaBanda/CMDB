@@ -20,3 +20,4 @@ from services.eks_functions import get_eks_clusters, insert_or_update_eks_data
 from services.ecr_functions import get_ecr_repositories, insert_or_update_ecr_data
 from services.kms_functions import get_kms_keys, insert_or_update_kms_data
 from services.lambda_functions import get_lambda_functions, insert_or_update_lambda_data
+from services.codebuild_functions import get_codebuild_projects, insert_or_update_codebuild_data

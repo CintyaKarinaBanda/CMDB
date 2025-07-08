@@ -29,7 +29,8 @@ from services import (
     get_athena_queries, insert_or_update_athena_data,
     get_transfer_servers, insert_or_update_transfer_data,
     get_codepipeline_pipelines, insert_or_update_codepipeline_data,
-    get_emr_clusters, insert_or_update_emr_data
+    get_emr_clusters, insert_or_update_emr_data,
+    get_codebuild_projects, insert_or_update_codebuild_data
 )
 
 def assume_role(role_arn):
@@ -71,7 +72,8 @@ def process_account_region(account_id, role_name, account_name, region, services
         "athena": lambda: get_athena_queries(region, creds, account_id, account_name),
         "transfer": lambda: get_transfer_servers(region, creds, account_id, account_name),
         "codepipeline": lambda: get_codepipeline_pipelines(region, creds, account_id, account_name),
-        "emr": lambda: get_emr_clusters(region, creds, account_id, account_name)
+        "emr": lambda: get_emr_clusters(region, creds, account_id, account_name),
+        "codebuild": lambda: get_codebuild_projects(region, creds, account_id, account_name)
     }
 
     result = {"account_id": account_id, "region": region, "credentials": creds}
@@ -138,7 +140,8 @@ def main(services):
         "athena": insert_or_update_athena_data,
         "transfer": insert_or_update_transfer_data,
         "codepipeline": insert_or_update_codepipeline_data,
-        "emr": insert_or_update_emr_data
+        "emr": insert_or_update_emr_data,
+        "codebuild": insert_or_update_codebuild_data
     }
 
     for s in services:
@@ -175,8 +178,8 @@ def main(services):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Recolecta información de recursos AWS')
     parser.add_argument('--services', nargs='+', default=["ec2", "cloudtrail"],
-                      choices=["ec2", "rds", "redshift", "vpc", "subnets", "cloudtrail", "s3", "eks", "ecr", "kms", "lambda", "apigateway", "glue", "cloudformation", "cloudtrail_trails", "ssm", "tax", "stepfunctions", "athena", "transfer", "codepipeline", "emr", "all"],
+                      choices=["ec2", "rds", "redshift", "vpc", "subnets", "cloudtrail", "s3", "eks", "ecr", "kms", "lambda", "apigateway", "glue", "cloudformation", "cloudtrail_trails", "ssm", "tax", "stepfunctions", "athena", "transfer", "codepipeline", "emr", "codebuild", "all"],
                       help='Servicios a consultar')
     args = parser.parse_args()
-    services = ["ec2", "rds", "redshift", "vpc", "subnets", "s3", "eks", "ecr", "kms", "lambda", "apigateway", "glue", "cloudformation", "cloudtrail_trails", "ssm", "tax", "stepfunctions",  "athena", "transfer", "codepipeline", "emr"] if "all" in args.services else args.services
+    services = ["ec2", "rds", "redshift", "vpc", "subnets", "s3", "eks", "ecr", "kms", "lambda", "apigateway", "glue", "cloudformation", "cloudtrail_trails", "ssm", "tax", "stepfunctions",  "athena", "transfer", "codepipeline", "emr", "codebuild"] if "all" in args.services else args.services
     main(services)

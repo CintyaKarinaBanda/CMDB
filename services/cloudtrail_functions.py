@@ -80,6 +80,24 @@ def extract_resource_name(event_detail):
     
     return "unknown"
 
+def extract_user_name(event_detail):
+    """Extrae el nombre del usuario de diferentes tipos de identidad"""
+    user_identity = event_detail.get('userIdentity', {})
+    
+    # Intentar diferentes campos de usuario
+    user_name = (
+        user_identity.get('userName') or
+        user_identity.get('arn', '').split('/')[-1] or
+        user_identity.get('principalId', '').split(':')[-1] or
+        user_identity.get('type', 'unknown')
+    )
+    
+    # Limpiar nombres de usuario largos
+    if len(user_name) > 50:
+        user_name = user_name[-50:]  # Últimos 50 caracteres
+    
+    return user_name if user_name and user_name != 'unknown' else 'system'
+
 def is_valid_resource(resource_name, event_source):
     return (resource_name and resource_name != "unknown" and 
             (resource_name.startswith(("i-", "vpc-", "subnet-", "vol-", "snap-", "igw-", "nat-", "rtb-")) or 
@@ -195,11 +213,13 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
                         'event_time': convert_to_utc_time(event_detail.get('eventTime')),
                         'event_name': event_name,
                         'event_source': event_source,
-                        'user_name': event_detail.get('userIdentity', {}).get('userName', 'unknown'),
+                        'user_name': extract_user_name(event_detail),
                         'resource_name': resource_name if resource_name != 'unknown' else event_name.lower(),
                         'resource_type': RESOURCE_TYPES.get(event_source, 'UNKNOWN'),
                         'region': event_detail.get('awsRegion', region),
-                        'changes': extract_changes(event_detail)
+                        'changes': extract_changes(event_detail),
+                        'account_id': account_id,
+                        'account_name': account_name
                     })
             
             # Verificar si hay más páginas
@@ -233,11 +253,12 @@ def insert_or_update_cloudtrail_events(events_data):
             try:
                 cursor.execute("""
                     INSERT INTO cloudtrail_events 
-                    (event_id, event_time, event_name, event_source, user_name, resource_name, resource_type, region, changes, created_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                    (event_id, event_time, event_name, event_source, user_name, resource_name, resource_type, region, changes, account_id, account_name, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
                     ON CONFLICT (event_id) DO NOTHING
                 """, (event['event_id'], event['event_time'], event['event_name'], event['event_source'], 
-                     event['user_name'], event['resource_name'], event['resource_type'], event['region'], event['changes']))
+                     event['user_name'], event['resource_name'], event['resource_type'], event['region'], 
+                     event['changes'], event['account_id'], event['account_name']))
                 inserted += cursor.rowcount
             except:
                 continue
