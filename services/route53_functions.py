@@ -19,11 +19,11 @@ def get_route53_changed_by(record_id, field_name):
     finally:
         conn.close()
 
-def extract_route53_data(record, hosted_zone_name, account_name, account_id, region):
+def extract_route53_data(record, hosted_zone_name, hosted_zone_id, account_name, account_id, region):
     try:
         record_name = record.get('Name', 'N/A')
         record_type = record.get('Type', 'N/A')
-        record_id = f"{record_name}_{record_type}"
+        record_id = f"{hosted_zone_id}_{record_name}_{record_type}"
         
         # Extraer valores de ResourceRecords
         values = []
@@ -66,7 +66,7 @@ def get_route53_records(region, credentials, account_id, account_name):
                 records = records_response.get('ResourceRecordSets', [])
                 
                 for record in records:
-                    if (info := extract_route53_data(record, zone_name, account_name, account_id, region)):
+                    if (info := extract_route53_data(record, zone_name, zone_id, account_name, account_id, region)):
                         route53_data.append(info)
             except Exception as e:
                 print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ERROR: Route53 zone {zone_id}: {str(e)}")
@@ -98,6 +98,7 @@ def insert_or_update_route53_data(route53_data):
                     INSERT INTO route53 (account_name, account_id, domain_name, record_type, 
                     record_value, ttl, hosted_zone, record_id, last_updated)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                    ON CONFLICT (record_id) DO NOTHING
                 """, (
                     record["AccountName"], record["AccountID"], record["DomainName"], 
                     record["RecordType"], record["RecordValue"], record["TTL"],
