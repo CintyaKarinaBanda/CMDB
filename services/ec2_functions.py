@@ -150,12 +150,18 @@ def get_ec2_instances(region, credentials, account_id, account_name):
         return []
 
 def insert_or_update_ec2_data(ec2_data):
+    print(f"💾 DEBUG EC2: Iniciando inserción de {len(ec2_data) if ec2_data else 0} elementos")
+    
     if not ec2_data:
+        print("⚠️ DEBUG EC2: No hay datos para insertar")
         return {"processed": 0, "inserted": 0, "updated": 0}
 
     conn = get_db_connection()
     if not conn:
+        print("❌ DEBUG EC2: Error de conexión a la base de datos")
         return {"error": "DB connection failed", "processed": 0, "inserted": 0, "updated": 0}
+    
+    print("✅ DEBUG EC2: Conexión a BD exitosa")
 
     insert_sql = """
         INSERT INTO ec2 (
@@ -173,14 +179,17 @@ def insert_or_update_ec2_data(ec2_data):
 
     try:
         cursor = conn.cursor()
+        print("🔍 DEBUG EC2: Consultando datos existentes...")
 
         # Cargar datos existentes: {instanceid: row_dict}
         cursor.execute("SELECT * FROM ec2")
         cols = [col[0].lower() for col in cursor.description]
+        existing_rows = cursor.fetchall()
         existing = {
             row[cols.index("instanceid")]: dict(zip(cols, row))
-            for row in cursor.fetchall()
+            for row in existing_rows
         }
+        print(f"📊 DEBUG EC2: {len(existing)} registros existentes en BD")
 
         for ec2 in ec2_data:
             processed += 1
@@ -225,10 +234,13 @@ def insert_or_update_ec2_data(ec2_data):
                 updated += 1
 
         conn.commit()
+        print(f"✅ DEBUG EC2: Transacción completada - {inserted} insertados, {updated} actualizados")
         return {"processed": processed, "inserted": inserted, "updated": updated}
 
     except Exception as e:
         conn.rollback()
+        print(f"❌ DEBUG EC2: Error en transacción: {str(e)}")
         return {"error": str(e), "processed": 0, "inserted": 0, "updated": 0}
     finally:
         conn.close()
+        print("🔒 DEBUG EC2: Conexión cerrada")

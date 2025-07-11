@@ -29,16 +29,20 @@ def create_aws_client(service, region, credentials):
 
 def get_db_connection():
     """Establece conexión con la base de datos."""
+    print(f"🔗 DEBUG DB: Intentando conectar a {DB_HOST}:{DB_NAME} como {DB_USER}")
     try:
-        return pg8000.connect(
+        conn = pg8000.connect(
             user=DB_USER,
             password=DB_PASSWORD,
             host=DB_HOST,
             port=5432,
             database=DB_NAME
         )
+        print("✅ DEBUG DB: Conexión exitosa")
+        return conn
     except Exception as e:
-        print(f"[ERROR] Conexión a base de datos: {str(e)}")
+        print(f"❌ DEBUG DB: Error de conexión: {str(e)}")
+        print(f"❌ DEBUG DB: Host: {DB_HOST}, DB: {DB_NAME}, User: {DB_USER}")
         return None
 
 def execute_db_query(query, params=None, fetch=False, many=False):
