@@ -140,38 +140,10 @@ def insert_or_update_rds_data(rds_data):
                 cursor.execute(query_insert.replace('CURRENT_TIMESTAMP', 'NOW()'), insert_values)
                 inserted += 1
             else:
-                db_row = existing_data[(instance_id, rds["AccountID"])]
-                updates = []
-                values = []
-
-                campos = {
-                    "accountname": rds["AccountName"],
-                    "accountid": rds["AccountID"],
-                    "dbinstanceid": rds["DbInstanceId"],
-                    "dbname": rds["DbName"],
-                    "enginetype": rds["EngineType"],
-                    "engineversion": rds["EngineVersion"],
-                    "storagesize": rds["StorageSize"],
-                    "instancetype": rds["InstanceType"],
-                    "status": rds["Status"],
-                    "region": rds["Region"],
-                    "endpoint": rds["Endpoint"],
-                    "port": rds["Port"],
-                    "hasreplica": rds["HasReplica"]
-                }
-
-                # Verificar si cambió el account_id o dbinstanceid (campos de identificación)
-                if (str(db_row.get('account_id')) != str(rds["AccountID"]) or 
-                    str(db_row.get('dbinstanceid')) != str(rds["DbInstanceId"])):
-                    # Si cambió la identificación, insertar como nuevo registro
-                    cursor.execute(query_insert.replace('CURRENT_TIMESTAMP', 'NOW()'), insert_values)
-                    inserted += 1
-                    continue
-                
                 # Siempre actualizar last_updated para registros existentes
                 cursor.execute("""
-                    UPDATE rds SET last_updated = NOW() WHERE dbinstanceid = %s
-                """, (instance_id,))
+                    UPDATE rds SET last_updated = NOW() WHERE dbinstanceid = %s AND accountid = %s
+                """, (instance_id, rds["AccountID"]))
                 updated += 1
 
         conn.commit()
