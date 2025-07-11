@@ -22,5 +22,5 @@ from services.kms_functions import get_kms_keys, insert_or_update_kms_data
 from services.lambda_functions import get_lambda_functions, insert_or_update_lambda_data
 from services.codebuild_functions import get_codebuild_projects, insert_or_update_codebuild_data
 from services.sns_functions import get_sns_topics, insert_or_update_sns_data
-from services.tableau_functions import get_tableau_workbooks, insert_or_update_tableau_data
+
 from services.route53_functions import get_route53_records, insert_or_update_route53_data
