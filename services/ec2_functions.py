@@ -212,26 +212,11 @@ def insert_or_update_ec2_data(ec2_data):
                 inserted += 1
                 continue
 
-            # UPDATE campos que cambiaron
-            updates, values = [], []
-            for col, new_val in ec2.items():
-                col_db = col.lower()
-                if col_db in ["accountid", "accountname", "instanceid"]:
-                    continue  
-                old_val = db_row.get(col_db)
-                if not normalize_list_comparison(old_val, new_val):
-                    updates.append(f"{col} = %s")
-                    values.append(new_val)
-                    changed_by = get_instance_changed_by(iid, col)
-                    log_change('EC2', iid, col, old_val, new_val, changed_by, ec2["AccountID"], ec2["Region"])
-
-            if updates:
-                updates.append("last_updated = NOW()")
-                values.append(iid)
-                cursor.execute(f"""
-                    UPDATE ec2 SET {', '.join(updates)} WHERE instanceid = %s
-                """, tuple(values))
-                updated += 1
+            # Siempre actualizar last_updated para registros existentes
+            cursor.execute("""
+                UPDATE ec2 SET last_updated = NOW() WHERE instanceid = %s
+            """, (iid,))
+            updated += 1
 
         conn.commit()
         print(f"✅ DEBUG EC2: Transacción completada - {inserted} insertados, {updated} actualizados")
