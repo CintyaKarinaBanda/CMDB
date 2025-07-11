@@ -76,6 +76,36 @@ def assume_role(role_arn):
         print(f"❌ DEBUG: Error inesperado asumiendo rol {role_arn}: {str(e)}")
         return {"error": str(e)}
 
+def get_service_funcs(region, creds, account_id, account_name):
+    """Retorna el diccionario de funciones de servicios"""
+    return {
+        "ec2": lambda: get_ec2_instances(region, creds, account_id, account_name),
+        "rds": lambda: get_rds_instances(region, creds, account_id, account_name),
+        "redshift": lambda: get_redshift_clusters(region, creds, account_id, account_name),
+        "vpc": lambda: get_vpc_details(region, creds, account_id, account_name),
+        "subnets": lambda: get_subnets_details(region, creds, account_id, account_name),
+        "cloudtrail": lambda: get_all_cloudtrail_events(region, creds, account_id, account_name).get("events", []),
+        "s3": lambda: get_s3_buckets(region, creds, account_id, account_name),
+        "eks": lambda: get_eks_clusters(region, creds, account_id, account_name),
+        "ecr": lambda: get_ecr_repositories(region, creds, account_id, account_name),
+        "kms": lambda: get_kms_keys(region, creds, account_id, account_name),
+        "lambda": lambda: get_lambda_functions(region, creds, account_id, account_name),
+        "apigateway": lambda: get_apigateway_apis(region, creds, account_id, account_name),
+        "glue": lambda: get_glue_jobs(region, creds, account_id, account_name),
+        "cloudformation": lambda: get_cloudformation_stacks(region, creds, account_id, account_name),
+        "cloudtrail_trails": lambda: get_cloudtrail_trails(region, creds, account_id, account_name),
+        "ssm": lambda: get_ssm_associations(region, creds, account_id, account_name),
+        "tax": lambda: get_tax_queries(region, creds, account_id, account_name),
+        "stepfunctions": lambda: get_stepfunctions_state_machines(region, creds, account_id, account_name),
+        "athena": lambda: get_athena_queries(region, creds, account_id, account_name),
+        "transfer": lambda: get_transfer_servers(region, creds, account_id, account_name),
+        "codepipeline": lambda: get_codepipeline_pipelines(region, creds, account_id, account_name),
+        "emr": lambda: get_emr_clusters(region, creds, account_id, account_name),
+        "codebuild": lambda: get_codebuild_projects(region, creds, account_id, account_name),
+        "sns": lambda: get_sns_topics(region, creds, account_id, account_name),
+        "route53": lambda: get_route53_records(region, creds, account_id, account_name)
+    }
+
 def process_account_region(account_id, role_name, account_name, region, services):
     print(f"🔍 DEBUG: Procesando cuenta {account_id} ({account_name}) en región {region}")
     creds = assume_role(f"arn:aws:iam::{account_id}:role/{role_name}")
@@ -85,6 +115,9 @@ def process_account_region(account_id, role_name, account_name, region, services
 
 
 
+    # Obtener funciones de servicios para esta cuenta/región
+    service_funcs = get_service_funcs(region, creds, account_id, account_name)
+    
     result = {"account_id": account_id, "region": region, "credentials": creds}
     for service in services:
         try:
@@ -118,68 +151,12 @@ def main(services):
     print(f"🔧 DEBUG: Primeros 3 roles: {ROLES[:3]}")
     print(f"🔧 DEBUG: Base de datos: {DB_HOST}:{DB_NAME}")
     
-    # DEBUG: Verificar funciones de servicios disponibles
-    service_funcs = {
-        "ec2": lambda: get_ec2_instances(region, creds, account_id, account_name),
-        "rds": lambda: get_rds_instances(region, creds, account_id, account_name),
-        "redshift": lambda: get_redshift_clusters(region, creds, account_id, account_name),
-        "vpc": lambda: get_vpc_details(region, creds, account_id, account_name),
-        "subnets": lambda: get_subnets_details(region, creds, account_id, account_name),
-        "cloudtrail": lambda: get_all_cloudtrail_events(region, creds, account_id, account_name).get("events", []),
-        "s3": lambda: get_s3_buckets(region, creds, account_id, account_name),
-        "eks": lambda: get_eks_clusters(region, creds, account_id, account_name),
-        "ecr": lambda: get_ecr_repositories(region, creds, account_id, account_name),
-        "kms": lambda: get_kms_keys(region, creds, account_id, account_name),
-        "lambda": lambda: get_lambda_functions(region, creds, account_id, account_name),
-        "apigateway": lambda: get_apigateway_apis(region, creds, account_id, account_name),
-        "glue": lambda: get_glue_jobs(region, creds, account_id, account_name),
-        "cloudformation": lambda: get_cloudformation_stacks(region, creds, account_id, account_name),
-        "cloudtrail_trails": lambda: get_cloudtrail_trails(region, creds, account_id, account_name),
-        "ssm": lambda: get_ssm_associations(region, creds, account_id, account_name),
-        "tax": lambda: get_tax_queries(region, creds, account_id, account_name),
-        "stepfunctions": lambda: get_stepfunctions_state_machines(region, creds, account_id, account_name),
-        "athena": lambda: get_athena_queries(region, creds, account_id, account_name),
-        "transfer": lambda: get_transfer_servers(region, creds, account_id, account_name),
-        "codepipeline": lambda: get_codepipeline_pipelines(region, creds, account_id, account_name),
-        "emr": lambda: get_emr_clusters(region, creds, account_id, account_name),
-        "codebuild": lambda: get_codebuild_projects(region, creds, account_id, account_name),
-        "sns": lambda: get_sns_topics(region, creds, account_id, account_name),
-        "route53": lambda: get_route53_records(region, creds, account_id, account_name)
-    }
-    
-    insert_funcs = {
-        "ec2": insert_or_update_ec2_data,
-        "rds": insert_or_update_rds_data,
-        "redshift": insert_or_update_redshift_data,
-        "vpc": insert_or_update_vpc_data,
-        "subnets": insert_or_update_subnet_data,
-        "cloudtrail": insert_or_update_cloudtrail_events,
-        "s3": insert_or_update_s3_data,
-        "eks": insert_or_update_eks_data,
-        "ecr": insert_or_update_ecr_data,
-        "kms": insert_or_update_kms_data,
-        "lambda": insert_or_update_lambda_data,
-        "apigateway": insert_or_update_apigateway_data,
-        "glue": insert_or_update_glue_data,
-        "cloudformation": insert_or_update_cloudformation_data,
-        "cloudtrail_trails": insert_or_update_cloudtrail_trails_data,
-        "ssm": insert_or_update_ssm_data,
-        "tax": insert_or_update_tax_data,
-        "stepfunctions": insert_or_update_stepfunctions_data,
-        "athena": insert_or_update_athena_data,
-        "transfer": insert_or_update_transfer_data,
-        "codepipeline": insert_or_update_codepipeline_data,
-        "emr": insert_or_update_emr_data,
-        "codebuild": insert_or_update_codebuild_data,
-        "sns": insert_or_update_sns_data,
-        "route53": insert_or_update_route53_data
-    }
-    
-    print(f"🔧 DEBUG: Servicios disponibles: {list(service_funcs.keys())}")
-    print(f"🔧 DEBUG: Funciones de inserción disponibles: {list(insert_funcs.keys())}")
+    # DEBUG: Verificar servicios disponibles
+    available_services = ["ec2", "rds", "redshift", "vpc", "subnets", "cloudtrail", "s3", "eks", "ecr", "kms", "lambda", "apigateway", "glue", "cloudformation", "cloudtrail_trails", "ssm", "tax", "stepfunctions", "athena", "transfer", "codepipeline", "emr", "codebuild", "sns", "route53"]
+    print(f"🔧 DEBUG: Servicios disponibles: {available_services}")
     
     # DEBUG: Verificar que los servicios solicitados estén disponibles
-    missing_services = [s for s in services if s not in service_funcs]
+    missing_services = [s for s in services if s not in available_services]
     if missing_services:
         print(f"⚠️ DEBUG: Servicios no disponibles: {missing_services}")
 
@@ -214,6 +191,34 @@ def main(services):
                 } for d in service_data])
 
 
+
+    insert_funcs = {
+        "ec2": insert_or_update_ec2_data,
+        "rds": insert_or_update_rds_data,
+        "redshift": insert_or_update_redshift_data,
+        "vpc": insert_or_update_vpc_data,
+        "subnets": insert_or_update_subnet_data,
+        "cloudtrail": insert_or_update_cloudtrail_events,
+        "s3": insert_or_update_s3_data,
+        "eks": insert_or_update_eks_data,
+        "ecr": insert_or_update_ecr_data,
+        "kms": insert_or_update_kms_data,
+        "lambda": insert_or_update_lambda_data,
+        "apigateway": insert_or_update_apigateway_data,
+        "glue": insert_or_update_glue_data,
+        "cloudformation": insert_or_update_cloudformation_data,
+        "cloudtrail_trails": insert_or_update_cloudtrail_trails_data,
+        "ssm": insert_or_update_ssm_data,
+        "tax": insert_or_update_tax_data,
+        "stepfunctions": insert_or_update_stepfunctions_data,
+        "athena": insert_or_update_athena_data,
+        "transfer": insert_or_update_transfer_data,
+        "codepipeline": insert_or_update_codepipeline_data,
+        "emr": insert_or_update_emr_data,
+        "codebuild": insert_or_update_codebuild_data,
+        "sns": insert_or_update_sns_data,
+        "route53": insert_or_update_route53_data
+    }
 
     for s in services:
         entries = collected_data.get(s, [])
