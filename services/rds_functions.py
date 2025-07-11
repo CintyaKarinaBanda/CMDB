@@ -168,25 +168,11 @@ def insert_or_update_rds_data(rds_data):
                     inserted += 1
                     continue
                 
-                for col, new_val in campos.items():
-                    # Saltar campos de identificación para actualizaciones
-                    if col in ['account_id', 'dbinstanceid']:
-                        continue
-                    
-                    old_val = db_row.get(col)
-                    if not normalize_list_comparison(old_val, new_val):
-                        updates.append(f"{col} = %s")
-                        values.append(new_val)
-                        changed_by = get_instance_changed_by(instance_id=instance_id, field_name=col)
-                        log_change('RDS', instance_id, col, old_val, new_val, changed_by, rds["AccountID"], rds["Region"])
-
-                updates.append("last_updated = NOW()")
-
-                if updates:
-                    update_query = f"UPDATE rds SET {', '.join(updates)} WHERE dbinstanceid = %s"
-                    values.append(instance_id)
-                    cursor.execute(update_query, tuple(values))
-                    updated += 1
+                # Siempre actualizar last_updated para registros existentes
+                cursor.execute("""
+                    UPDATE rds SET last_updated = NOW() WHERE dbinstanceid = %s
+                """, (instance_id,))
+                updated += 1
 
         conn.commit()
         return {
