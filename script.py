@@ -32,7 +32,7 @@ from services import (
     get_emr_clusters, insert_or_update_emr_data,
     get_codebuild_projects, insert_or_update_codebuild_data,
     get_sns_topics, insert_or_update_sns_data,
-    get_tableau_workbooks, insert_or_update_tableau_data,
+
     get_route53_records, insert_or_update_route53_data
 )
 
@@ -78,7 +78,7 @@ def process_account_region(account_id, role_name, account_name, region, services
         "emr": lambda: get_emr_clusters(region, creds, account_id, account_name),
         "codebuild": lambda: get_codebuild_projects(region, creds, account_id, account_name),
         "sns": lambda: get_sns_topics(region, creds, account_id, account_name),
-        "tableau": lambda: get_tableau_workbooks(region, creds, account_id, account_name),
+
         "route53": lambda: get_route53_records(region, creds, account_id, account_name)
     }
 
@@ -149,7 +149,7 @@ def main(services):
         "emr": insert_or_update_emr_data,
         "codebuild": insert_or_update_codebuild_data,
         "sns": insert_or_update_sns_data,
-        "tableau": insert_or_update_tableau_data,
+
         "route53": insert_or_update_route53_data
     }
 
@@ -187,8 +187,8 @@ def main(services):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Recolecta información de recursos AWS')
     parser.add_argument('--services', nargs='+', default=["ec2", "cloudtrail"],
-                      choices=["ec2", "rds", "redshift", "vpc", "subnets", "cloudtrail", "s3", "eks", "ecr", "kms", "lambda", "apigateway", "glue", "cloudformation", "cloudtrail_trails", "ssm", "tax", "stepfunctions", "athena", "transfer", "codepipeline", "emr", "codebuild", "sns", "tableau", "route53", "all"],
+                      choices=["ec2", "rds", "redshift", "vpc", "subnets", "cloudtrail", "s3", "eks", "ecr", "kms", "lambda", "apigateway", "glue", "cloudformation", "cloudtrail_trails", "ssm", "tax", "stepfunctions", "athena", "transfer", "codepipeline", "emr", "codebuild", "sns", "route53", "all"],
                       help='Servicios a consultar')
     args = parser.parse_args()
-    services = ["ec2", "rds", "redshift", "vpc", "subnets", "s3", "eks", "ecr", "kms", "lambda", "apigateway", "glue", "cloudformation", "cloudtrail_trails", "ssm", "tax", "stepfunctions",  "athena", "transfer", "codepipeline", "emr", "codebuild", "sns", "tableau", "route53"] if "all" in args.services else args.services
+    services = ["ec2", "rds", "redshift", "vpc", "subnets", "s3", "eks", "ecr", "kms", "lambda", "apigateway", "glue", "cloudformation", "cloudtrail_trails", "ssm", "tax", "stepfunctions",  "athena", "transfer", "codepipeline", "emr", "codebuild", "sns", "route53"] if "all" in args.services else args.services
     main(services)
