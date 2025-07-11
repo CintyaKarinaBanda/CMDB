@@ -157,9 +157,7 @@ def main(services):
         entries = collected_data.get(s, [])
         
         if not entries:
-            # Para CloudTrail, mostrar 0 eventos si no hay datos
-            if s == "cloudtrail":
-                messages.append("CLOUDTRAIL: 0 eventos nuevos")
+            messages.append(f"{s.upper()}: 0 cambios")
             continue
         
         grouped = {}
@@ -173,12 +171,17 @@ def main(services):
             total_inserted += res.get('inserted', 0)
             total_updated += res.get('updated', 0)
         
-        if total_inserted or total_updated:
-            status = f"{total_inserted} nuevos" if total_inserted and not total_updated else f"{total_updated} actualizados" if total_updated and not total_inserted else f"{total_inserted} nuevos, {total_updated} actualizados"
-            messages.append(f"{s.upper()}: {status}")
-        elif s == "cloudtrail":
-            # Siempre mostrar CloudTrail, incluso con 0
-            messages.append(f"CLOUDTRAIL: {total_inserted} eventos nuevos")
+        # Mostrar estadísticas para todos los servicios
+        if total_inserted and total_updated:
+            status = f"{total_inserted} nuevos, {total_updated} actualizados"
+        elif total_inserted:
+            status = f"{total_inserted} nuevos"
+        elif total_updated:
+            status = f"{total_updated} actualizados"
+        else:
+            status = "0 cambios"
+        
+        messages.append(f"{s.upper()}: {status}")
 
     print(f"✅ Completado: {' | '.join(messages)} | ⏱️ {(datetime.now() - start).total_seconds():.0f}s")
     if errors:
