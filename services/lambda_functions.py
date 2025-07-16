@@ -58,12 +58,45 @@ def extract_lambda_data(function, lambda_client, account_name, account_id, regio
         vpc_info = "N/A"
         env_vars = 0
     
-    # Get triggers
+    # Get triggers with details
+    triggers_list = []
     try:
+        # Event source mappings (SQS, DynamoDB, Kinesis, etc.)
         triggers_response = lambda_client.list_event_source_mappings(FunctionName=function_name)
-        triggers = len(triggers_response.get("EventSourceMappings", []))
+        for mapping in triggers_response.get("EventSourceMappings", []):
+            source_arn = mapping.get("EventSourceArn", "")
+            if "sqs" in source_arn:
+                triggers_list.append(f"SQS: {source_arn.split(':')[-1]}")
+            elif "dynamodb" in source_arn:
+                triggers_list.append(f"DynamoDB: {source_arn.split('/')[-1]}")
+            elif "kinesis" in source_arn:
+                triggers_list.append(f"Kinesis: {source_arn.split('/')[-1]}")
+            else:
+                triggers_list.append(f"EventSource: {source_arn.split(':')[-1]}")
     except:
-        triggers = 0
+        pass
+    
+    # Get function policy for other triggers (API Gateway, S3, etc.)
+    try:
+        policy_response = lambda_client.get_policy(FunctionName=function_name)
+        import json
+        policy = json.loads(policy_response.get("Policy", "{}"))
+        for statement in policy.get("Statement", []):
+            principal = statement.get("Principal", {})
+            if isinstance(principal, dict):
+                service = principal.get("Service", "")
+                if "apigateway" in service:
+                    triggers_list.append("API Gateway")
+                elif "s3" in service:
+                    triggers_list.append("S3")
+                elif "events" in service:
+                    triggers_list.append("EventBridge")
+                elif "sns" in service:
+                    triggers_list.append("SNS")
+    except:
+        pass
+    
+    triggers = triggers_list if triggers_list else ["None"]
     
     # Get tags
     try:
@@ -144,20 +177,11 @@ def insert_or_update_lambda_data(lambda_data):
                     inserted += 1
                     continue
                 
-                for col, new_val in campos.items():
-                    # Saltar campos de identificación para actualizaciones
-                    if col in ['accountid', 'functionname']:
-                        continue
-                    
-                    old_val = db_row.get(col)
-                    if not normalize_list_comparison(old_val, new_val):
-                        updates.append(f"{col} = %s")
-                        vals.append(new_val)
-                        log_change('LAMBDA', function_name, col, old_val, new_val, get_function_changed_by(function_name, col), func["AccountID"], func["Region"])
-                
-                if updates:
-                    cursor.execute(f"UPDATE lambda_functions SET {', '.join(updates)}, last_updated = NOW() WHERE functionname = %s", vals + [function_name])
-                    updated += 1
+                # Siempre actualizar last_updated para registros existentes
+                cursor.execute("""
+                    UPDATE lambda_functions SET last_updated = NOW() WHERE functionname = %s AND accountid = %s
+                """, (function_name, func["AccountID"]))
+                updated += 1
         
         conn.commit()
         return {"processed": processed, "inserted": inserted, "updated": updated}
