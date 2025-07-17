@@ -46,38 +46,30 @@ def get_function_changed_by(function_name, field_name):
     finally:
         conn.close()
 
-def get_lambda_triggers(lambda_client, function_name):
+def get_lambda_triggers(lambda_client, function_name, function_arn, region, credentials):
     """Obtiene todos los triggers asociados a la función Lambda"""
     triggers = set()
     
-    # Event source mappings
+    # Event source mappings (código existente)
     try:
         response = lambda_client.list_event_source_mappings(FunctionName=function_name)
-        print(f"Event source mappings for {function_name}: {response}")
         for mapping in response.get("EventSourceMappings", []):
             arn = mapping.get("EventSourceArn", "")
             state = mapping.get("State", "")
             if state == "Enabled" and arn:
                 if "sqs" in arn.lower():
-                    queue_name = arn.split(':')[-1]
-                    triggers.add(f"SQS:{queue_name}")
+                    triggers.add(f"SQS:{arn.split(':')[-1]}")
                 elif "dynamodb" in arn.lower():
-                    table_name = arn.split('/')[-1]
-                    triggers.add(f"DynamoDB:{table_name}")
+                    triggers.add(f"DynamoDB:{arn.split('/')[-1]}")
                 elif "kinesis" in arn.lower():
-                    stream_name = arn.split('/')[-1]
-                    triggers.add(f"Kinesis:{stream_name}")
-                elif "kafka" in arn.lower():
-                    cluster_name = arn.split('/')[-1]
-                    triggers.add(f"MSK:{cluster_name}")
+                    triggers.add(f"Kinesis:{arn.split('/')[-1]}")
                 else:
                     service_type = arn.split(':')[2] if ':' in arn else "Unknown"
-                    resource_name = arn.split(':')[-1] if ':' in arn else arn
-                    triggers.add(f"{service_type.upper()}:{resource_name}")
+                    triggers.add(f"{service_type.upper()}:{arn.split(':')[-1] if ':' in arn else arn}")
     except ClientError:
         pass
 
-    # Function policy (API Gateway, S3, CloudWatch Events, etc.)
+    # Function policy (código existente)
     try:
         policy_response = lambda_client.get_policy(FunctionName=function_name)
         policy = json.loads(policy_response.get("Policy", "{}"))
@@ -85,88 +77,71 @@ def get_lambda_triggers(lambda_client, function_name):
         for statement in policy.get("Statement", []):
             principal = statement.get("Principal", {})
             
-            # Handle different principal formats
             if isinstance(principal, str):
                 service = principal
             elif isinstance(principal, dict):
                 service = principal.get("Service", "")
-                aws_principal = principal.get("AWS", "")
-                if aws_principal and not service:
-                    # Could be cross-account access
-                    account_id = aws_principal.split(':')[4] if ':' in str(aws_principal) else str(aws_principal)
-                    triggers.add(f"Cross-Account:{account_id}")
-                    continue
             else:
                 continue
             
-            # Extract source ARN from conditions
-            condition = statement.get("Condition", {})
-            source_arn = None
-            for condition_type in ["ArnLike", "StringEquals", "StringLike", "ArnEquals"]:
-                if condition_type in condition:
-                    source_arn = (
-                        condition[condition_type].get("AWS:SourceArn") or
-                        condition[condition_type].get("aws:SourceArn")
-                    )
-                    if source_arn:
-                        break
-            
-            # Identify service type and extract resource info
             if "apigateway" in service.lower():
-                if source_arn and "execute-api" in source_arn:
-                    api_parts = source_arn.split(":")
-                    if len(api_parts) > 5:
-                        api_id = api_parts[5].split("/")[0]
-                        triggers.add(f"API Gateway:{api_id}")
-                    else:
-                        triggers.add("API Gateway")
-                else:
-                    triggers.add("API Gateway")
+                triggers.add("API Gateway")
             elif "s3" in service.lower():
-                if source_arn:
-                    bucket_name = source_arn.replace("arn:aws:s3:::", "").split("/")[0]
-                    triggers.add(f"S3:{bucket_name}")
-                else:
-                    triggers.add("S3")
+                triggers.add("S3")
             elif "events" in service.lower():
-                if source_arn and "rule" in source_arn:
-                    rule_name = source_arn.split("/")[-1]
-                    triggers.add(f"EventBridge:{rule_name}")
-                else:
-                    triggers.add("EventBridge")
+                triggers.add("EventBridge")
             elif "sns" in service.lower():
-                if source_arn:
-                    topic_name = source_arn.split(":")[-1]
-                    triggers.add(f"SNS:{topic_name}")
-                else:
-                    triggers.add("SNS")
-            elif "logs" in service.lower():
-                if source_arn:
-                    log_group = source_arn.split(":")[-1]
-                    triggers.add(f"CloudWatch Logs:{log_group}")
-                else:
-                    triggers.add("CloudWatch Logs")
-            elif "iot" in service.lower():
-                triggers.add("IoT")
-            elif "cognito" in service.lower():
-                triggers.add("Cognito")
-            elif "lex" in service.lower():
-                triggers.add("Lex")
-            elif "alexa" in service.lower():
-                triggers.add("Alexa")
+                triggers.add("SNS")
     except ClientError:
         pass
 
-    # Check for CloudWatch Events/EventBridge rules that target this function
+    # NUEVO: Verificar EventBridge Rules
     try:
-        events_client = lambda_client._client_config.region_name
-        # This would require additional API calls to events service
-        # For now, we rely on the policy-based detection above
-        pass
+        events_client = create_aws_client("events", region, credentials)
+        if events_client:
+            paginator = events_client.get_paginator('list_rules')
+            for page in paginator.paginate():
+                for rule in page.get('Rules', []):
+                    if rule.get('State') == 'ENABLED':
+                        try:
+                            targets = events_client.list_targets_by_rule(Rule=rule['Name'])
+                            for target in targets.get('Targets', []):
+                                if target.get('Arn') == function_arn:
+                                    triggers.add(f"EventBridge:{rule['Name']}")
+                        except ClientError:
+                            continue
     except:
         pass
 
-    return sorted(list(triggers)) if triggers else ["None"]
+    # NUEVO: Verificar API Gateway
+    try:
+        apigateway_client = create_aws_client("apigateway", region, credentials)
+        if apigateway_client:
+            apis = apigateway_client.get_rest_apis()
+            for api in apis.get('items', []):
+                api_id = api['id']
+                try:
+                    resources = apigateway_client.get_resources(restApiId=api_id)
+                    for resource in resources.get('items', []):
+                        for method_name, method in resource.get('resourceMethods', {}).items():
+                            try:
+                                method_details = apigateway_client.get_method(
+                                    restApiId=api_id,
+                                    resourceId=resource['id'],
+                                    httpMethod=method_name
+                                )
+                                integration = method_details.get('methodIntegration', {})
+                                if integration.get('uri', '').endswith(function_name):
+                                    triggers.add(f"API Gateway:{api_id}")
+                            except ClientError:
+                                continue
+                except ClientError:
+                    continue
+    except:
+        pass
+
+    return sorted(list(triggers)) if triggers else ["Manual/Unknown"]
+
 
 def get_lambda_tags(lambda_client, function_arn):
     """Obtiene las tags asociadas a la función Lambda"""
