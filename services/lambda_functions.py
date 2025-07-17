@@ -53,6 +53,7 @@ def get_lambda_triggers(lambda_client, function_name):
     # Event source mappings
     try:
         response = lambda_client.list_event_source_mappings(FunctionName=function_name)
+        print(f"Event source mappings for {function_name}: {response}")
         for mapping in response.get("EventSourceMappings", []):
             arn = mapping.get("EventSourceArn", "")
             state = mapping.get("State", "")
@@ -219,7 +220,6 @@ def get_lambda_functions(region, credentials, account_id, account_name):
             for function in page.get("Functions", []):
                 try:
                     data = extract_lambda_data(function, lambda_client, account_name, account_id, region)
-                    print(function)
                     functions_info.append(data)
                 except Exception:
                     continue
