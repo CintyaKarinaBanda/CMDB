@@ -49,66 +49,123 @@ def get_function_changed_by(function_name, field_name):
 def get_lambda_triggers(lambda_client, function_name):
     """Obtiene todos los triggers asociados a la función Lambda"""
     triggers = set()
+    
     # Event source mappings
     try:
         response = lambda_client.list_event_source_mappings(FunctionName=function_name)
         for mapping in response.get("EventSourceMappings", []):
             arn = mapping.get("EventSourceArn", "")
-            if "sqs" in arn:
-                triggers.add(f"SQS:{arn.split(':')[-1]}")
-            elif "dynamodb" in arn:
-                triggers.add(f"DynamoDB:{arn.split('/')[-1]}")
-            elif "kinesis" in arn:
-                triggers.add(f"Kinesis:{arn.split('/')[-1]}")
-            else:
-                triggers.add(f"EventSource:{arn.split(':')[-1]}")
+            state = mapping.get("State", "")
+            if state == "Enabled" and arn:
+                if "sqs" in arn.lower():
+                    queue_name = arn.split(':')[-1]
+                    triggers.add(f"SQS:{queue_name}")
+                elif "dynamodb" in arn.lower():
+                    table_name = arn.split('/')[-1]
+                    triggers.add(f"DynamoDB:{table_name}")
+                elif "kinesis" in arn.lower():
+                    stream_name = arn.split('/')[-1]
+                    triggers.add(f"Kinesis:{stream_name}")
+                elif "kafka" in arn.lower():
+                    cluster_name = arn.split('/')[-1]
+                    triggers.add(f"MSK:{cluster_name}")
+                else:
+                    service_type = arn.split(':')[2] if ':' in arn else "Unknown"
+                    resource_name = arn.split(':')[-1] if ':' in arn else arn
+                    triggers.add(f"{service_type.upper()}:{resource_name}")
     except ClientError:
         pass
 
-    # Function policy (API Gateway, S3, etc.)
+    # Function policy (API Gateway, S3, CloudWatch Events, etc.)
     try:
-        policy = json.loads(lambda_client.get_policy(FunctionName=function_name).get("Policy", "{}"))
+        policy_response = lambda_client.get_policy(FunctionName=function_name)
+        policy = json.loads(policy_response.get("Policy", "{}"))
+        
         for statement in policy.get("Statement", []):
             principal = statement.get("Principal", {})
-            service = principal.get("Service", "")
             
-            # Try multiple locations for source ARN
+            # Handle different principal formats
+            if isinstance(principal, str):
+                service = principal
+            elif isinstance(principal, dict):
+                service = principal.get("Service", "")
+                aws_principal = principal.get("AWS", "")
+                if aws_principal and not service:
+                    # Could be cross-account access
+                    account_id = aws_principal.split(':')[4] if ':' in str(aws_principal) else str(aws_principal)
+                    triggers.add(f"Cross-Account:{account_id}")
+                    continue
+            else:
+                continue
+            
+            # Extract source ARN from conditions
             condition = statement.get("Condition", {})
-            source_arn = (
-                condition.get("ArnLike", {}).get("AWS:SourceArn", "") or
-                condition.get("StringEquals", {}).get("AWS:SourceArn", "") or
-                condition.get("StringLike", {}).get("AWS:SourceArn", "") or
-                statement.get("Resource", "")
-            )
+            source_arn = None
+            for condition_type in ["ArnLike", "StringEquals", "StringLike", "ArnEquals"]:
+                if condition_type in condition:
+                    source_arn = (
+                        condition[condition_type].get("AWS:SourceArn") or
+                        condition[condition_type].get("aws:SourceArn")
+                    )
+                    if source_arn:
+                        break
             
-            if "apigateway" in service:
+            # Identify service type and extract resource info
+            if "apigateway" in service.lower():
                 if source_arn and "execute-api" in source_arn:
-                    api_id = source_arn.split(":")[-1].split("/")[0]
-                    triggers.add(f"API Gateway:{api_id}")
+                    api_parts = source_arn.split(":")
+                    if len(api_parts) > 5:
+                        api_id = api_parts[5].split("/")[0]
+                        triggers.add(f"API Gateway:{api_id}")
+                    else:
+                        triggers.add("API Gateway")
                 else:
                     triggers.add("API Gateway")
-            elif "s3" in service:
-                if source_arn and "s3" in source_arn:
-                    bucket_name = source_arn.split(":")[-1].split("/")[0]
+            elif "s3" in service.lower():
+                if source_arn:
+                    bucket_name = source_arn.replace("arn:aws:s3:::", "").split("/")[0]
                     triggers.add(f"S3:{bucket_name}")
                 else:
                     triggers.add("S3")
-            elif "events" in service:
-                if source_arn and "events" in source_arn:
+            elif "events" in service.lower():
+                if source_arn and "rule" in source_arn:
                     rule_name = source_arn.split("/")[-1]
                     triggers.add(f"EventBridge:{rule_name}")
                 else:
                     triggers.add("EventBridge")
-            elif "sns" in service:
-                if source_arn and "sns" in source_arn:
+            elif "sns" in service.lower():
+                if source_arn:
                     topic_name = source_arn.split(":")[-1]
                     triggers.add(f"SNS:{topic_name}")
                 else:
                     triggers.add("SNS")
+            elif "logs" in service.lower():
+                if source_arn:
+                    log_group = source_arn.split(":")[-1]
+                    triggers.add(f"CloudWatch Logs:{log_group}")
+                else:
+                    triggers.add("CloudWatch Logs")
+            elif "iot" in service.lower():
+                triggers.add("IoT")
+            elif "cognito" in service.lower():
+                triggers.add("Cognito")
+            elif "lex" in service.lower():
+                triggers.add("Lex")
+            elif "alexa" in service.lower():
+                triggers.add("Alexa")
     except ClientError:
         pass
 
-    return sorted(triggers) if triggers else ["None"]
+    # Check for CloudWatch Events/EventBridge rules that target this function
+    try:
+        events_client = lambda_client._client_config.region_name
+        # This would require additional API calls to events service
+        # For now, we rely on the policy-based detection above
+        pass
+    except:
+        pass
+
+    return sorted(list(triggers)) if triggers else ["None"]
 
 def get_lambda_tags(lambda_client, function_arn):
     """Obtiene las tags asociadas a la función Lambda"""
