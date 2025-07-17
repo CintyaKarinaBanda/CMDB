@@ -96,7 +96,7 @@ def extract_lambda_data(function, lambda_client, account_name, account_id, regio
     except:
         pass
     
-    triggers = triggers_list if triggers_list else ["None"]
+    triggers = ", ".join(triggers_list) if triggers_list else "None"
     
     # Get tags
     try:
