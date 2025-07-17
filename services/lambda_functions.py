@@ -58,42 +58,55 @@ def extract_lambda_data(function, lambda_client, account_name, account_id, regio
         vpc_info = "N/A"
         env_vars = 0
     
-    # Get triggers with details
+    # Get all triggers
     triggers_list = []
+    
+    # 1. Event source mappings (SQS, DynamoDB, Kinesis, etc.)
     try:
-        # Event source mappings (SQS, DynamoDB, Kinesis, etc.)
-        triggers_response = lambda_client.list_event_source_mappings(FunctionName=function_name)
-        for mapping in triggers_response.get("EventSourceMappings", []):
+        esm_response = lambda_client.list_event_source_mappings(FunctionName=function_name)
+        for mapping in esm_response.get("EventSourceMappings", []):
             source_arn = mapping.get("EventSourceArn", "")
-            if "sqs" in source_arn:
-                triggers_list.append(f"SQS: {source_arn.split(':')[-1]}")
-            elif "dynamodb" in source_arn:
-                triggers_list.append(f"DynamoDB: {source_arn.split('/')[-1]}")
-            elif "kinesis" in source_arn:
-                triggers_list.append(f"Kinesis: {source_arn.split('/')[-1]}")
-            else:
-                triggers_list.append(f"EventSource: {source_arn.split(':')[-1]}")
-    except:
+            if source_arn:
+                service_type = source_arn.split(":")[2]  # Extract service from ARN
+                resource_name = source_arn.split(":")[-1].split("/")[-1]
+                triggers_list.append(f"{service_type.upper()}: {resource_name}")
+    except Exception as e:
         pass
     
-    # Get function policy for other triggers (API Gateway, S3, etc.)
+    # 2. Resource-based policy triggers (API Gateway, S3, SNS, etc.)
     try:
         policy_response = lambda_client.get_policy(FunctionName=function_name)
         import json
         policy = json.loads(policy_response.get("Policy", "{}"))
+        
+        services_found = set()
         for statement in policy.get("Statement", []):
             principal = statement.get("Principal", {})
+            
+            # Handle different principal formats
             if isinstance(principal, dict):
                 service = principal.get("Service", "")
-                if "apigateway" in service:
-                    triggers_list.append("API Gateway")
-                elif "s3" in service:
-                    triggers_list.append("S3")
-                elif "events" in service:
-                    triggers_list.append("EventBridge")
-                elif "sns" in service:
-                    triggers_list.append("SNS")
-    except:
+            elif isinstance(principal, str):
+                service = principal
+            else:
+                continue
+                
+            # Extract service name
+            if "apigateway" in service:
+                services_found.add("API Gateway")
+            elif "s3" in service:
+                services_found.add("S3")
+            elif "events" in service:
+                services_found.add("EventBridge")
+            elif "sns" in service:
+                services_found.add("SNS")
+            elif "logs" in service:
+                services_found.add("CloudWatch Logs")
+            elif "iot" in service:
+                services_found.add("IoT")
+        
+        triggers_list.extend(list(services_found))
+    except Exception as e:
         pass
     
     triggers = ", ".join(triggers_list) if triggers_list else "None"
