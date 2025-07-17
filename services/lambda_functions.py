@@ -71,14 +71,40 @@ def get_lambda_triggers(lambda_client, function_name):
         for statement in policy.get("Statement", []):
             principal = statement.get("Principal", {})
             service = principal.get("Service", "")
+            
+            # Try multiple locations for source ARN
+            condition = statement.get("Condition", {})
+            source_arn = (
+                condition.get("ArnLike", {}).get("AWS:SourceArn", "") or
+                condition.get("StringEquals", {}).get("AWS:SourceArn", "") or
+                condition.get("StringLike", {}).get("AWS:SourceArn", "") or
+                statement.get("Resource", "")
+            )
+            
             if "apigateway" in service:
-                triggers.add("API Gateway")
+                if source_arn and "execute-api" in source_arn:
+                    api_id = source_arn.split(":")[-1].split("/")[0]
+                    triggers.add(f"API Gateway:{api_id}")
+                else:
+                    triggers.add("API Gateway")
             elif "s3" in service:
-                triggers.add("S3")
+                if source_arn and "s3" in source_arn:
+                    bucket_name = source_arn.split(":")[-1].split("/")[0]
+                    triggers.add(f"S3:{bucket_name}")
+                else:
+                    triggers.add("S3")
             elif "events" in service:
-                triggers.add("EventBridge")
+                if source_arn and "events" in source_arn:
+                    rule_name = source_arn.split("/")[-1]
+                    triggers.add(f"EventBridge:{rule_name}")
+                else:
+                    triggers.add("EventBridge")
             elif "sns" in service:
-                triggers.add("SNS")
+                if source_arn and "sns" in source_arn:
+                    topic_name = source_arn.split(":")[-1]
+                    triggers.add(f"SNS:{topic_name}")
+                else:
+                    triggers.add("SNS")
     except ClientError:
         pass
 
