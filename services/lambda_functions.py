@@ -219,6 +219,7 @@ def get_lambda_functions(region, credentials, account_id, account_name):
             for function in page.get("Functions", []):
                 try:
                     data = extract_lambda_data(function, lambda_client, account_name, account_id, region)
+                    print(function)
                     functions_info.append(data)
                 except Exception:
                     continue
