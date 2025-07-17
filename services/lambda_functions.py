@@ -1,10 +1,7 @@
 from botocore.exceptions import ClientError
 from datetime import datetime
-import time
+import json
 from services.utils import create_aws_client, get_db_connection, log_change
-
-def get_local_time():
-    return 'NOW()'
 
 FIELD_EVENT_MAP = {
     "functionname": ["CreateFunction", "UpdateFunctionConfiguration"],
@@ -21,9 +18,9 @@ FIELD_EVENT_MAP = {
 
 def normalize_list_comparison(old_val, new_val):
     """Normaliza listas para comparación, ignorando orden"""
-    if isinstance(new_val, list) and isinstance(old_val, (list, str)):
+    if isinstance(new_val, list):
         old_list = old_val if isinstance(old_val, list) else str(old_val).split(',') if old_val else []
-        return sorted([str(x).strip() for x in old_list]) == sorted([str(x).strip() for x in new_val])
+        return sorted(map(str, old_list)) == sorted(map(str, new_val))
     return str(old_val) == str(new_val)
 
 def get_function_changed_by(function_name, field_name):
@@ -33,97 +30,87 @@ def get_function_changed_by(function_name, field_name):
     try:
         with conn.cursor() as cursor:
             events = FIELD_EVENT_MAP.get(field_name, [])
-            if events:
-                placeholders = ','.join(['%s'] * len(events))
-                cursor.execute(f"SELECT user_name FROM cloudtrail_events WHERE resource_name = %s AND resource_type = 'LAMBDA' AND event_name IN ({placeholders}) ORDER BY event_time DESC LIMIT 1", (function_name, *events))
-            else:
-                cursor.execute("SELECT user_name FROM cloudtrail_events WHERE resource_name = %s AND resource_type = 'LAMBDA' ORDER BY event_time DESC LIMIT 1", (function_name,))
-            return cursor.fetchone()[0] if cursor.fetchone() else "unknown"
-    except:
+            placeholders = ','.join(['%s'] * len(events))
+            sql = f"""
+                SELECT user_name 
+                FROM cloudtrail_events 
+                WHERE resource_name = %s AND resource_type = 'LAMBDA'
+                {"AND event_name IN (" + placeholders + ")" if events else ""}
+                ORDER BY event_time DESC LIMIT 1
+            """
+            cursor.execute(sql, (function_name, *events) if events else (function_name,))
+            row = cursor.fetchone()
+            return row[0] if row else "unknown"
+    except Exception:
         return "unknown"
     finally:
         conn.close()
 
-def extract_lambda_data(function, lambda_client, account_name, account_id, region):
-    function_name = function["FunctionName"]
-    
-    # Get function configuration
+def get_lambda_triggers(lambda_client, function_name):
+    """Obtiene todos los triggers asociados a la función Lambda"""
+    triggers = set()
+    # Event source mappings
     try:
-        config = lambda_client.get_function_configuration(FunctionName=function_name)
-        vpc_config = config.get("VpcConfig", {})
-        vpc_info = f"VPC: {vpc_config.get('VpcId', 'N/A')}, Subnets: {len(vpc_config.get('SubnetIds', []))}" if vpc_config.get('VpcId') else "N/A"
-        env_vars = len(config.get("Environment", {}).get("Variables", {}))
-    except:
-        config = function
-        vpc_info = "N/A"
-        env_vars = 0
-    
-    # Get all triggers
-    triggers_list = []
-    
-    # 1. Event source mappings (SQS, DynamoDB, Kinesis, etc.)
-    try:
-        esm_response = lambda_client.list_event_source_mappings(FunctionName=function_name)
-        for mapping in esm_response.get("EventSourceMappings", []):
-            source_arn = mapping.get("EventSourceArn", "")
-            if source_arn:
-                service_type = source_arn.split(":")[2]  # Extract service from ARN
-                resource_name = source_arn.split(":")[-1].split("/")[-1]
-                triggers_list.append(f"{service_type.upper()}: {resource_name}")
-    except Exception as e:
+        response = lambda_client.list_event_source_mappings(FunctionName=function_name)
+        for mapping in response.get("EventSourceMappings", []):
+            arn = mapping.get("EventSourceArn", "")
+            if "sqs" in arn:
+                triggers.add(f"SQS:{arn.split(':')[-1]}")
+            elif "dynamodb" in arn:
+                triggers.add(f"DynamoDB:{arn.split('/')[-1]}")
+            elif "kinesis" in arn:
+                triggers.add(f"Kinesis:{arn.split('/')[-1]}")
+            else:
+                triggers.add(f"EventSource:{arn.split(':')[-1]}")
+    except ClientError:
         pass
-    
-    # 2. Resource-based policy triggers (API Gateway, S3, SNS, etc.)
+
+    # Function policy (API Gateway, S3, etc.)
     try:
-        policy_response = lambda_client.get_policy(FunctionName=function_name)
-        import json
-        policy = json.loads(policy_response.get("Policy", "{}"))
-        
-        services_found = set()
+        policy = json.loads(lambda_client.get_policy(FunctionName=function_name).get("Policy", "{}"))
         for statement in policy.get("Statement", []):
             principal = statement.get("Principal", {})
-            
-            # Handle different principal formats
-            if isinstance(principal, dict):
-                service = principal.get("Service", "")
-            elif isinstance(principal, str):
-                service = principal
-            else:
-                continue
-                
-            # Extract service name
+            service = principal.get("Service", "")
             if "apigateway" in service:
-                services_found.add("API Gateway")
+                triggers.add("API Gateway")
             elif "s3" in service:
-                services_found.add("S3")
+                triggers.add("S3")
             elif "events" in service:
-                services_found.add("EventBridge")
+                triggers.add("EventBridge")
             elif "sns" in service:
-                services_found.add("SNS")
-            elif "logs" in service:
-                services_found.add("CloudWatch Logs")
-            elif "iot" in service:
-                services_found.add("IoT")
-        
-        triggers_list.extend(list(services_found))
-    except Exception as e:
+                triggers.add("SNS")
+    except ClientError:
         pass
-    
-    triggers = ", ".join(triggers_list) if triggers_list else "None"
-    
-    # Get tags
+
+    return sorted(triggers) if triggers else ["None"]
+
+def get_lambda_tags(lambda_client, function_arn):
+    """Obtiene las tags asociadas a la función Lambda"""
     try:
-        tags_response = lambda_client.list_tags(Resource=function.get("FunctionArn", ""))
-        tags = tags_response.get("Tags", {})
-        get_tag = lambda key: tags.get(key, "N/A")
-    except:
-        tags = {}
-        get_tag = lambda key: "N/A"
+        response = lambda_client.list_tags(Resource=function_arn)
+        return response.get("Tags", {})
+    except ClientError:
+        return {}
+
+def extract_lambda_data(function, lambda_client, account_name, account_id, region):
+    function_name = function["FunctionName"]
+    function_arn = function.get("FunctionArn", "")
+    try:
+        config = lambda_client.get_function_configuration(FunctionName=function_name)
+    except ClientError:
+        config = function  # fallback
     
+    vpc_config = config.get("VpcConfig", {})
+    vpc_info = (f"VPC:{vpc_config.get('VpcId', 'N/A')},Subnets:{len(vpc_config.get('SubnetIds', []))}"
+                if vpc_config.get('VpcId') else "N/A")
+    env_vars_count = len(config.get("Environment", {}).get("Variables", {}))
+    triggers = get_lambda_triggers(lambda_client, function_name)
+    tags = get_lambda_tags(lambda_client, function_arn)
+
     return {
         "AccountName": account_name,
         "AccountID": account_id,
-        "FunctionID": function.get("FunctionArn", "").split(":")[-1] if function.get("FunctionArn") else function_name,
+        "FunctionID": function_arn.split(":")[-1] if function_arn else function_name,
         "FunctionName": function_name,
         "Description": config.get("Description", "N/A"),
         "Handler": config.get("Handler", "N/A"),
@@ -131,27 +118,29 @@ def extract_lambda_data(function, lambda_client, account_name, account_id, regio
         "MemorySize": config.get("MemorySize", 0),
         "Timeout": config.get("Timeout", 0),
         "Role": config.get("Role", "N/A").split("/")[-1] if config.get("Role") else "N/A",
-        "Environment": env_vars,
-        "Triggers": triggers,
+        "Environment": env_vars_count,
+        "Triggers": json.dumps(triggers),  # Guardar como JSON
         "VPCConfig": vpc_info,
         "Region": region,
-        "Tags": tags
+        "Tags": json.dumps(tags)
     }
 
 def get_lambda_functions(region, credentials, account_id, account_name):
     lambda_client = create_aws_client("lambda", region, credentials)
     if not lambda_client:
         return []
+    functions_info = []
     try:
-        functions_info = []
-        for page in lambda_client.get_paginator('list_functions').paginate():
+        paginator = lambda_client.get_paginator('list_functions')
+        for page in paginator.paginate():
             for function in page.get("Functions", []):
                 try:
-                    functions_info.append(extract_lambda_data(function, lambda_client, account_name, account_id, region))
-                except:
+                    data = extract_lambda_data(function, lambda_client, account_name, account_id, region)
+                    functions_info.append(data)
+                except Exception:
                     continue
         return functions_info
-    except:
+    except ClientError:
         return []
 
 def insert_or_update_lambda_data(lambda_data):
@@ -160,43 +149,47 @@ def insert_or_update_lambda_data(lambda_data):
     conn = get_db_connection()
     if not conn:
         return {"error": "DB connection failed", "processed": 0, "inserted": 0, "updated": 0}
-    
+
     inserted = updated = processed = 0
     try:
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM lambda_functions")
-        columns = [desc[0].lower() for desc in cursor.description]
-        existing = {(row[columns.index("functionname")], row[columns.index("accountid")]): dict(zip(columns, row)) for row in cursor.fetchall()}
-        
-        for func in lambda_data:
-            processed += 1
-            function_name = func["FunctionName"]
-            values = (func["AccountName"], func["AccountID"], func["FunctionID"], func["FunctionName"], func["Description"], func["Handler"], func["Runtime"], func["MemorySize"], func["Timeout"], func["Role"], func["Environment"], func["Triggers"], func["VPCConfig"], func["Region"], func["Tags"])
-            
-            if (function_name, func["AccountID"]) not in existing:
-                cursor.execute("INSERT INTO lambda_functions (AccountName, AccountID, FunctionID, FunctionName, Description, Handler, Runtime, MemorySize, Timeout, Role, Environment, Triggers, VPCConfig, Region, Tags, last_updated) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())", values)
-                inserted += 1
-            else:
-                db_row = existing[(function_name, func["AccountID"])]
-                updates = []
-                vals = []
-                campos = {"accountname": func["AccountName"], "accountid": func["AccountID"], "functionid": func["FunctionID"], "functionname": func["FunctionName"], "description": func["Description"], "handler": func["Handler"], "runtime": func["Runtime"], "memorysize": func["MemorySize"], "timeout": func["Timeout"], "role": func["Role"], "environment": func["Environment"], "triggers": func["Triggers"], "vpcconfig": func["VPCConfig"], "region": func["Region"], "tags": func["Tags"]}
-                
-                # Verificar si cambió el account_id o function_name (campos de identificación)
-                if (str(db_row.get('accountid')) != str(func["AccountID"]) or 
-                    str(db_row.get('functionname')) != str(func["FunctionName"])):
-                    # Si cambió la identificación, insertar como nuevo registro
-                    cursor.execute("INSERT INTO lambda_functions (AccountName, AccountID, FunctionID, FunctionName, Description, Handler, Runtime, MemorySize, Timeout, Role, Environment, Triggers, VPCConfig, Region, Tags, last_updated) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())", values)
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT * FROM lambda_functions")
+            columns = [desc[0].lower() for desc in cursor.description]
+            existing = {(row[columns.index("functionname")], row[columns.index("accountid")]): dict(zip(columns, row)) for row in cursor.fetchall()}
+
+            for func in lambda_data:
+                processed += 1
+                key = (func["FunctionName"], func["AccountID"])
+                values = (
+                    func["AccountName"], func["AccountID"], func["FunctionID"], func["FunctionName"],
+                    func["Description"], func["Handler"], func["Runtime"], func["MemorySize"],
+                    func["Timeout"], func["Role"], func["Environment"], func["Triggers"],
+                    func["VPCConfig"], func["Region"], func["Tags"]
+                )
+
+                if key not in existing:
+                    cursor.execute("""
+                        INSERT INTO lambda_functions
+                        (AccountName, AccountID, FunctionID, FunctionName, Description, Handler,
+                        Runtime, MemorySize, Timeout, Role, Environment, Triggers, VPCConfig, Region, Tags, last_updated)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                    """, values)
                     inserted += 1
-                    continue
-                
-                # Siempre actualizar last_updated para registros existentes
-                cursor.execute("""
-                    UPDATE lambda_functions SET last_updated = NOW() WHERE functionname = %s AND accountid = %s
-                """, (function_name, func["AccountID"]))
-                updated += 1
-        
-        conn.commit()
+                else:
+                    cursor.execute("""
+                        UPDATE lambda_functions
+                        SET AccountName=%s, Description=%s, Handler=%s, Runtime=%s,
+                            MemorySize=%s, Timeout=%s, Role=%s, Environment=%s,
+                            Triggers=%s, VPCConfig=%s, Region=%s, Tags=%s, last_updated=NOW()
+                        WHERE FunctionName=%s AND AccountID=%s
+                    """, (
+                        func["AccountName"], func["Description"], func["Handler"], func["Runtime"],
+                        func["MemorySize"], func["Timeout"], func["Role"], func["Environment"],
+                        func["Triggers"], func["VPCConfig"], func["Region"], func["Tags"],
+                        func["FunctionName"], func["AccountID"]
+                    ))
+                    updated += 1
+            conn.commit()
         return {"processed": processed, "inserted": inserted, "updated": updated}
     except Exception as e:
         conn.rollback()
