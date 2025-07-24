@@ -137,7 +137,7 @@ def extract_changes(event_detail):
     for events, func in patterns.items():
         if event_name in events:
             result = func()
-            if any(result.values()):  # Only add if has meaningful values
+            if any(result.values()): 
                 changes.update({k: v for k, v in result.items() if v})
                 break
     
@@ -174,7 +174,7 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
         return {"events": []}
 
     try:
-        start_time = datetime.now() - timedelta(days=1)
+        start_time = datetime.now() - timedelta(days=30)
         events = []
         total_events = 0
         filtered_events = 0
@@ -182,7 +182,7 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
         # Obtener múltiples páginas manualmente
         next_token = None
         pages_processed = 0
-        max_pages = 20  # 20 páginas x 50 eventos = 1000 eventos máximo
+        max_pages = 50  # 20 páginas x 50 eventos = 1000 eventos máximo
         
         while pages_processed < max_pages:
             params = {
