@@ -200,10 +200,12 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
             except ClientError as e:
                 if e.response['Error']['Code'] == 'ThrottlingException':
                     if attempt < max_retries - 1:
-                        wait_time = (2 ** attempt) + (attempt * 0.5)  # Backoff exponencial
+                        wait_time = (2 ** attempt) + (attempt * 0.5)
                         time.sleep(wait_time)
                         continue
-                raise e
+                return None
+            except Exception:
+                return None
         return None
 
     try:
@@ -255,7 +257,7 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
                         'account_name': account_name
                     })
             
-            next_token = page.get('NextToken')
+            next_token = page.get('NextToken') if page else None
             if not next_token:
                 break
                 
