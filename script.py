@@ -107,10 +107,6 @@ def main(services):
     max_workers = min(10, len(ROLES) * len(Regions))
     total_jobs = len(ROLES) * len(Regions)
 
-    # Reducir workers para CloudTrail para evitar throttling
-    if "cloudtrail" in services:
-        max_workers = min(3, len(ROLES) * len(Regions))  # Máximo 3 workers para CloudTrail
-    
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [
             executor.submit(process_account_region, r["id"], r["role"], 
