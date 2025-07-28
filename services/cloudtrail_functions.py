@@ -169,6 +169,8 @@ def extract_changes(event_detail):
     return json.dumps(changes) if changes else None
 
 def get_all_cloudtrail_events(region, credentials, account_id, account_name):
+    import time
+    
     cloudtrail_client = create_aws_client("cloudtrail", region, credentials)
     if not cloudtrail_client:
         return {"events": []}
@@ -179,10 +181,10 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
         total_events = 0
         filtered_events = 0
         
-        # Obtener múltiples páginas manualmente
+        # Obtener múltiples páginas con rate limiting
         next_token = None
         pages_processed = 0
-        max_pages = 5000  # 20 páginas x 50 eventos = 1000 eventos máximo
+        max_pages = 20  # Reducir páginas para evitar throttling
         
         while pages_processed < max_pages:
             params = {
@@ -193,21 +195,49 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
             if next_token:
                 params['NextToken'] = next_token
             
-            page = cloudtrail_client.lookup_events(**params)
+            # Rate limiting - esperar entre llamadas
+            if pages_processed > 0:
+                time.sleep(0.2)  # 200ms entre llamadas
+            
+            try:
+                page = cloudtrail_client.lookup_events(**params)
+            except Exception as api_error:
+                if "ThrottlingException" in str(api_error) or "Rate exceeded" in str(api_error):
+                    time.sleep(2)  # Esperar más tiempo en throttling
+                    try:
+                        page = cloudtrail_client.lookup_events(**params)
+                    except:
+                        break  # Salir si persiste el error
+                else:
+                    raise api_error
+            
             pages_processed += 1
             
+            # Verificar que page no sea None
+            if not page or 'Events' not in page:
+                break
+                
             for event in page.get('Events', []):
                 total_events += 1
-                event_detail = json.loads(event.get('CloudTrailEvent', '{}'))
+                
+                # Verificar que el evento tenga CloudTrailEvent
+                cloudtrail_event = event.get('CloudTrailEvent')
+                if not cloudtrail_event:
+                    continue
+                    
+                try:
+                    event_detail = json.loads(cloudtrail_event)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                    
                 event_name = event_detail.get('eventName', '')
                 event_source = event_detail.get('eventSource', '')
                 
-                # Solo filtrar por eventos importantes, sin validar recursos
+                # Solo filtrar por eventos importantes
                 if event_name in IMPORTANT_EVENTS and event_source in EVENT_SOURCES:
                     filtered_events += 1
                     resource_name = extract_resource_name(event_detail)
                     
-                    # Insertar TODOS los eventos importantes, sin filtro de recursos
                     events.append({
                         'event_id': event_detail.get('eventID', ''),
                         'event_time': convert_to_utc_time(event_detail.get('eventTime')),
@@ -227,13 +257,15 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
             if not next_token:
                 break
         
-        # Debug temporal - mostrar para todas las regiones con eventos
-        if total_events > 0:
-            print(f"DEBUG CloudTrail {region}/{account_id}: {total_events} total, {filtered_events} importantes, {len(events)} insertados")
+        # Solo mostrar si hay eventos procesados
+        if filtered_events > 0:
+            print(f"CloudTrail {region}: {filtered_events} eventos importantes encontrados")
         
         return {"events": events}
     except Exception as e:
-        print(f"DEBUG CloudTrail ERROR {region}: {str(e)}")
+        error_msg = str(e)
+        if "ThrottlingException" not in error_msg and "Rate exceeded" not in error_msg:
+            print(f"CloudTrail ERROR {region}: {error_msg}")
         return {"events": []}
 
 def insert_or_update_cloudtrail_events(events_data):
