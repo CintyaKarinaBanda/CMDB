@@ -192,19 +192,23 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
     if not cloudtrail_client:
         return {"events": []}
 
-    def make_request_with_backoff(params, max_retries=5):
+    def make_request_with_backoff(params, max_retries=3):
         """Realiza request con backoff exponencial para manejar throttling"""
         for attempt in range(max_retries):
             try:
-                return cloudtrail_client.lookup_events(**params)
+                result = cloudtrail_client.lookup_events(**params)
+                return result
             except ClientError as e:
-                if e.response['Error']['Code'] == 'ThrottlingException':
-                    if attempt < max_retries - 1:
-                        wait_time = (2 ** attempt) + (attempt * 0.5)
-                        time.sleep(wait_time)
-                        continue
-                return None
-            except Exception:
+                error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+                if error_code == 'ThrottlingException' and attempt < max_retries - 1:
+                    wait_time = (2 ** attempt) + 1
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    print(f"DEBUG CloudTrail ClientError {region}: {error_code} - {str(e)}")
+                    return None
+            except Exception as e:
+                print(f"DEBUG CloudTrail Exception {region}: {str(e)}")
                 return None
         return None
 
@@ -222,20 +226,38 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
             params = {
                 'StartTime': start_time,
                 'EndTime': datetime.now(),
-                'MaxResults': 50  
+                'MaxResults': 20
             }
             if next_token:
                 params['NextToken'] = next_token
             
             page = make_request_with_backoff(params)
-            if not page:
+            if page is None:
+                print(f"DEBUG CloudTrail {region}: Request failed, stopping")
                 break
                 
             pages_processed += 1
             
-            for event in page.get('Events', []):
+            # Verificar que page sea un dict válido
+            if not isinstance(page, dict):
+                print(f"DEBUG CloudTrail {region}: Invalid response type: {type(page)}")
+                break
+            
+            events_list = page.get('Events', [])
+            for event in events_list:
+                if not event or not isinstance(event, dict):
+                    continue
+                    
                 total_events += 1
-                event_detail = json.loads(event.get('CloudTrailEvent', '{}'))
+                cloudtrail_event = event.get('CloudTrailEvent', '{}')
+                if not cloudtrail_event:
+                    continue
+                    
+                try:
+                    event_detail = json.loads(cloudtrail_event)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                    
                 event_name = event_detail.get('eventName', '')
                 event_source = event_detail.get('eventSource', '')
                 
@@ -257,12 +279,11 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
                         'account_name': account_name
                     })
             
-            next_token = page.get('NextToken') if page else None
+            next_token = page.get('NextToken')
             if not next_token:
                 break
                 
-            # Pausa entre requests para evitar throttling
-            time.sleep(0.2)
+            time.sleep(0.5)
         
         if total_events > 0:
             print(f"DEBUG CloudTrail {region}/{account_id}: {total_events} total, {filtered_events} importantes, {len(events)} insertados")
