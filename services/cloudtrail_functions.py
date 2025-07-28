@@ -74,48 +74,93 @@ SERVICE_FIELDS = {
 RESOURCE_TYPES = {"ec2.amazonaws.com": "EC2", "rds.amazonaws.com": "RDS", "redshift.amazonaws.com": "Redshift", "s3.amazonaws.com": "S3", "eks.amazonaws.com": "EKS", "ecr.amazonaws.com": "ECR", "kms.amazonaws.com": "KMS", "lambda.amazonaws.com": "LAMBDA", "apigateway.amazonaws.com": "API-GATEWAY", "glue.amazonaws.com": "GLUE", "cloudformation.amazonaws.com": "CLOUDFORMATION", "cloudtrail.amazonaws.com": "CLOUDTRAIL", "ssm.amazonaws.com": "SSM", "athena.amazonaws.com": "ATHENA", "states.amazonaws.com": "STEP-FUNCTIONS", "transfer.amazonaws.com": "TRANSFER-FAMILY", "codepipeline.amazonaws.com": "CODEPIPELINE", "elasticmapreduce.amazonaws.com": "EMR", "sts.amazonaws.com": "STS", "config.amazonaws.com": "CONFIG", "ecs.amazonaws.com": "ECS", "tagging.amazonaws.com": "TAGGING", "resource-explorer-2.amazonaws.com": "RESOURCE-EXPLORER"}
 
 def extract_resource_name(event_detail):
-    req = event_detail.get("requestParameters", {})
-    resp = event_detail.get("responseElements", {})
-    event_source = event_detail.get("eventSource", "")
-    
-    # Check resource sets
-    for set_name in ["resourcesSet", "instancesSet"]:
-        if set_name in req and req[set_name].get("items"):
-            return req[set_name]["items"][0].get("resourceId" if set_name == "resourcesSet" else "instanceId", "unknown")
-    
-    # Check service fields
-    for field in SERVICE_FIELDS.get(event_source, []):
-        if req.get(field): return req[field]
-    
-    # Check response fields
-    for field in ["instanceId", "dBInstanceIdentifier", "clusterIdentifier", "vpcId", "subnetId", "bucketName", "name", "keyId", "functionName"]:
-        if resp.get(field): return resp[field]
-    
-    # Generic search
-    for key, value in {**req, **resp}.items():
-        if isinstance(value, str) and value and (key.lower().endswith(('id', 'name')) or 'identifier' in key.lower()):
-            if key not in ['requestId', 'eventId', 'eventName', 'userName', 'principalId']:
-                return value
-    
-    return "unknown"
+    try:
+        if not event_detail or not isinstance(event_detail, dict):
+            print(f"DEBUG extract_resource_name: Invalid event_detail: {type(event_detail)}")
+            return "unknown"
+            
+        req = event_detail.get("requestParameters", {})
+        resp = event_detail.get("responseElements", {})
+        event_source = event_detail.get("eventSource", "")
+        
+        if req is None:
+            req = {}
+        if resp is None:
+            resp = {}
+        
+        # Check resource sets
+        for set_name in ["resourcesSet", "instancesSet"]:
+            if set_name in req and req[set_name] and req[set_name].get("items"):
+                items = req[set_name].get("items", [])
+                if items and len(items) > 0:
+                    return items[0].get("resourceId" if set_name == "resourcesSet" else "instanceId", "unknown")
+        
+        # Check service fields
+        service_fields = SERVICE_FIELDS.get(event_source, [])
+        for field in service_fields:
+            if req.get(field): 
+                return req[field]
+        
+        # Check response fields
+        for field in ["instanceId", "dBInstanceIdentifier", "clusterIdentifier", "vpcId", "subnetId", "bucketName", "name", "keyId", "functionName"]:
+            if resp.get(field): 
+                return resp[field]
+        
+        # Generic search
+        combined = {}
+        if isinstance(req, dict):
+            combined.update(req)
+        if isinstance(resp, dict):
+            combined.update(resp)
+            
+        for key, value in combined.items():
+            if isinstance(value, str) and value and (key.lower().endswith(('id', 'name')) or 'identifier' in key.lower()):
+                if key not in ['requestId', 'eventId', 'eventName', 'userName', 'principalId']:
+                    return value
+        
+        return "unknown"
+    except Exception as e:
+        print(f"DEBUG extract_resource_name ERROR: {str(e)}")
+        return "unknown"
 
 def extract_user_name(event_detail):
     """Extrae el nombre del usuario de diferentes tipos de identidad"""
-    user_identity = event_detail.get('userIdentity', {})
-    
-    # Intentar diferentes campos de usuario
-    user_name = (
-        user_identity.get('userName') or
-        user_identity.get('arn', '').split('/')[-1] or
-        user_identity.get('principalId', '').split(':')[-1] or
-        user_identity.get('type', 'unknown')
-    )
-    
-    # Limpiar nombres de usuario largos
-    if len(user_name) > 50:
-        user_name = user_name[-50:]  # Últimos 50 caracteres
-    
-    return user_name if user_name and user_name != 'unknown' else 'system'
+    try:
+        if not event_detail or not isinstance(event_detail, dict):
+            print(f"DEBUG extract_user_name: Invalid event_detail: {type(event_detail)}")
+            return 'system'
+            
+        user_identity = event_detail.get('userIdentity', {})
+        if user_identity is None:
+            user_identity = {}
+        
+        # Intentar diferentes campos de usuario
+        user_name = None
+        
+        if user_identity.get('userName'):
+            user_name = user_identity.get('userName')
+        elif user_identity.get('arn'):
+            arn = user_identity.get('arn', '')
+            if arn:
+                user_name = arn.split('/')[-1]
+        elif user_identity.get('principalId'):
+            principal = user_identity.get('principalId', '')
+            if principal:
+                user_name = principal.split(':')[-1]
+        else:
+            user_name = user_identity.get('type', 'unknown')
+        
+        if not user_name or user_name == 'unknown':
+            user_name = 'system'
+        
+        # Limpiar nombres de usuario largos
+        if len(user_name) > 50:
+            user_name = user_name[-50:]
+        
+        return user_name
+    except Exception as e:
+        print(f"DEBUG extract_user_name ERROR: {str(e)}")
+        return 'system'
 
 def is_valid_resource(resource_name, event_source):
     return (resource_name and resource_name != "unknown" and 
@@ -123,9 +168,23 @@ def is_valid_resource(resource_name, event_source):
              event_source in ["rds.amazonaws.com", "redshift.amazonaws.com", "s3.amazonaws.com", "eks.amazonaws.com", "ecr.amazonaws.com", "kms.amazonaws.com", "lambda.amazonaws.com"]))
 
 def extract_changes(event_detail):
-    req = event_detail.get("requestParameters", {})
-    event_name = event_detail.get("eventName", "")
-    changes = {}
+    try:
+        if not event_detail or not isinstance(event_detail, dict):
+            print(f"DEBUG extract_changes: Invalid event_detail: {type(event_detail)}")
+            return None
+            
+        req = event_detail.get("requestParameters", {})
+        event_name = event_detail.get("eventName", "")
+        
+        if req is None:
+            req = {}
+        if not event_name:
+            event_name = "unknown"
+            
+        changes = {}
+    except Exception as e:
+        print(f"DEBUG extract_changes ERROR: {str(e)}")
+        return None
     
     # Pattern matching for common events
     patterns = {
@@ -153,12 +212,15 @@ def extract_changes(event_detail):
     }
     
     # Check patterns
-    for events, func in patterns.items():
-        if event_name in events:
-            result = func()
-            if any(result.values()): 
-                changes.update({k: v for k, v in result.items() if v})
-                break
+    try:
+        for events, func in patterns.items():
+            if event_name in events:
+                result = func()
+                if result and any(result.values()): 
+                    changes.update({k: v for k, v in result.items() if v})
+                    break
+    except Exception as e:
+        print(f"DEBUG extract_changes patterns ERROR: {str(e)}")
     
     # Special cases
     if not changes:
@@ -226,7 +288,7 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
             params = {
                 'StartTime': start_time,
                 'EndTime': datetime.now(),
-                'MaxResults': 20
+                'MaxResults': 50
             }
             if next_token:
                 params['NextToken'] = next_token
@@ -261,23 +323,33 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
                 event_name = event_detail.get('eventName', '')
                 event_source = event_detail.get('eventSource', '')
                 
-                if event_name in IMPORTANT_EVENTS and event_source in EVENT_SOURCES:
-                    filtered_events += 1
-                    resource_name = extract_resource_name(event_detail)
-                    
-                    events.append({
-                        'event_id': event_detail.get('eventID', ''),
-                        'event_time': convert_to_utc_time(event_detail.get('eventTime')),
-                        'event_name': event_name,
-                        'event_source': event_source,
-                        'user_name': extract_user_name(event_detail),
-                        'resource_name': resource_name if resource_name != 'unknown' else event_name.lower(),
-                        'resource_type': RESOURCE_TYPES.get(event_source, 'UNKNOWN'),
-                        'region': event_detail.get('awsRegion', region),
-                        'changes': extract_changes(event_detail),
-                        'account_id': account_id,
-                        'account_name': account_name
-                    })
+                try:
+                    if IMPORTANT_EVENTS is None or EVENT_SOURCES is None:
+                        print(f"DEBUG CloudTrail {region}: IMPORTANT_EVENTS or EVENT_SOURCES is None")
+                        continue
+                        
+                    if event_name in IMPORTANT_EVENTS and event_source in EVENT_SOURCES:
+                        filtered_events += 1
+                        resource_name = extract_resource_name(event_detail)
+                        user_name = extract_user_name(event_detail)
+                        changes = extract_changes(event_detail)
+                        
+                        events.append({
+                            'event_id': event_detail.get('eventID', ''),
+                            'event_time': convert_to_utc_time(event_detail.get('eventTime')),
+                            'event_name': event_name,
+                            'event_source': event_source,
+                            'user_name': user_name,
+                            'resource_name': resource_name if resource_name != 'unknown' else event_name.lower(),
+                            'resource_type': RESOURCE_TYPES.get(event_source, 'UNKNOWN'),
+                            'region': event_detail.get('awsRegion', region),
+                            'changes': changes,
+                            'account_id': account_id,
+                            'account_name': account_name
+                        })
+                except Exception as e:
+                    print(f"DEBUG CloudTrail event processing ERROR {region}: {str(e)}")
+                    continue
             
             next_token = page.get('NextToken')
             if not next_token:
