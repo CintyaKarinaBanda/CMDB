@@ -3,9 +3,16 @@ from datetime import datetime, timedelta
 from services.utils import create_aws_client
 
 def convert_to_utc_time(utc_time):
+    if utc_time is None:
+        return datetime.now()
     if isinstance(utc_time, str):
-        utc_time = datetime.fromisoformat(utc_time.replace('Z', '+00:00'))
-    return utc_time.replace(tzinfo=None)
+        try:
+            utc_time = datetime.fromisoformat(utc_time.replace('Z', '+00:00'))
+        except (ValueError, TypeError):
+            return datetime.now()
+    if hasattr(utc_time, 'replace'):
+        return utc_time.replace(tzinfo=None)
+    return datetime.now()
 
 IMPORTANT_EVENTS = {
     "StartInstances", "StopInstances", "RebootInstances", "TerminateInstances", "ModifyInstanceAttribute", "CreateTags", "DeleteTags", "RunInstances", "AttachVolume", "DetachVolume", "CreateVolume", "DeleteVolume", "ModifyVolume",
@@ -55,14 +62,24 @@ SERVICE_FIELDS = {
 RESOURCE_TYPES = {"ec2.amazonaws.com": "EC2", "rds.amazonaws.com": "RDS", "redshift.amazonaws.com": "Redshift", "s3.amazonaws.com": "S3", "eks.amazonaws.com": "EKS", "ecr.amazonaws.com": "ECR", "kms.amazonaws.com": "KMS", "lambda.amazonaws.com": "LAMBDA", "apigateway.amazonaws.com": "API-GATEWAY", "glue.amazonaws.com": "GLUE", "cloudformation.amazonaws.com": "CLOUDFORMATION", "cloudtrail.amazonaws.com": "CLOUDTRAIL", "ssm.amazonaws.com": "SSM", "athena.amazonaws.com": "ATHENA", "states.amazonaws.com": "STEP-FUNCTIONS", "transfer.amazonaws.com": "TRANSFER-FAMILY", "codepipeline.amazonaws.com": "CODEPIPELINE", "elasticmapreduce.amazonaws.com": "EMR"}
 
 def extract_resource_name(event_detail):
+    if not isinstance(event_detail, dict):
+        return "unknown"
+        
     req = event_detail.get("requestParameters", {})
     resp = event_detail.get("responseElements", {})
     event_source = event_detail.get("eventSource", "")
     
+    if not isinstance(req, dict):
+        req = {}
+    if not isinstance(resp, dict):
+        resp = {}
+    
     # Check resource sets
     for set_name in ["resourcesSet", "instancesSet"]:
-        if set_name in req and req[set_name].get("items"):
-            return req[set_name]["items"][0].get("resourceId" if set_name == "resourcesSet" else "instanceId", "unknown")
+        if set_name in req and isinstance(req[set_name], dict) and req[set_name].get("items"):
+            items = req[set_name]["items"]
+            if isinstance(items, list) and len(items) > 0 and isinstance(items[0], dict):
+                return items[0].get("resourceId" if set_name == "resourcesSet" else "instanceId", "unknown")
     
     # Check service fields
     for field in SERVICE_FIELDS.get(event_source, []):
@@ -82,7 +99,12 @@ def extract_resource_name(event_detail):
 
 def extract_user_name(event_detail):
     """Extrae el nombre del usuario de diferentes tipos de identidad"""
+    if not isinstance(event_detail, dict):
+        return 'system'
+        
     user_identity = event_detail.get('userIdentity', {})
+    if not isinstance(user_identity, dict):
+        return 'system'
     
     # Intentar diferentes campos de usuario
     user_name = (
@@ -93,7 +115,7 @@ def extract_user_name(event_detail):
     )
     
     # Limpiar nombres de usuario largos
-    if len(user_name) > 50:
+    if isinstance(user_name, str) and len(user_name) > 50:
         user_name = user_name[-50:]  # Últimos 50 caracteres
     
     return user_name if user_name and user_name != 'unknown' else 'system'
@@ -171,12 +193,16 @@ def extract_changes(event_detail):
 def get_all_cloudtrail_events(region, credentials, account_id, account_name):
     import time
     
+    # Validar credenciales antes de crear cliente
+    if not credentials or not isinstance(credentials, dict):
+        return {"events": []}
+    
     cloudtrail_client = create_aws_client("cloudtrail", region, credentials)
     if not cloudtrail_client:
         return {"events": []}
 
     try:
-        start_time = datetime.now() - timedelta(days=30)
+        start_time = datetime.now() - timedelta(days=7)  # Reducir a 7 días para prueba
         events = []
         total_events = 0
         filtered_events = 0
@@ -184,49 +210,72 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
         # Obtener múltiples páginas con rate limiting
         next_token = None
         pages_processed = 0
-        max_pages = 20  # Reducir páginas para evitar throttling
+        max_pages = 5  # Reducir aún más para debugging
         
         while pages_processed < max_pages:
             params = {
                 'StartTime': start_time,
                 'EndTime': datetime.now(),
-                'MaxResults': 50
+                'MaxResults': 20  # Reducir tamaño de página
             }
             if next_token:
                 params['NextToken'] = next_token
             
             # Rate limiting - esperar entre llamadas
             if pages_processed > 0:
-                time.sleep(0.2)  # 200ms entre llamadas
+                time.sleep(0.5)  # Aumentar tiempo de espera
             
+            page = None
             try:
                 page = cloudtrail_client.lookup_events(**params)
             except Exception as api_error:
-                if "ThrottlingException" in str(api_error) or "Rate exceeded" in str(api_error):
-                    time.sleep(2)  # Esperar más tiempo en throttling
+                error_str = str(api_error)
+                if "ThrottlingException" in error_str or "Rate exceeded" in error_str:
+                    time.sleep(3)  # Esperar más tiempo
                     try:
                         page = cloudtrail_client.lookup_events(**params)
-                    except:
-                        break  # Salir si persiste el error
+                    except Exception as retry_error:
+                        print(f"CloudTrail {region}: Throttling persistente, saltando")
+                        break
                 else:
-                    raise api_error
+                    print(f"CloudTrail ERROR {region}: {error_str}")
+                    break
             
             pages_processed += 1
             
-            # Verificar que page no sea None
-            if not page or 'Events' not in page:
+            # Validaciones exhaustivas
+            if page is None:
+                print(f"CloudTrail {region}: Respuesta None")
                 break
                 
-            for event in page.get('Events', []):
+            if not isinstance(page, dict):
+                print(f"CloudTrail {region}: Respuesta no es dict")
+                break
+                
+            if 'Events' not in page:
+                print(f"CloudTrail {region}: No hay clave 'Events'")
+                break
+                
+            events_list = page.get('Events')
+            if not isinstance(events_list, list):
+                print(f"CloudTrail {region}: 'Events' no es lista")
+                break
+                
+            for event in events_list:
+                if not isinstance(event, dict):
+                    continue
+                    
                 total_events += 1
                 
                 # Verificar que el evento tenga CloudTrailEvent
                 cloudtrail_event = event.get('CloudTrailEvent')
-                if not cloudtrail_event:
+                if not cloudtrail_event or not isinstance(cloudtrail_event, str):
                     continue
                     
                 try:
                     event_detail = json.loads(cloudtrail_event)
+                    if not isinstance(event_detail, dict):
+                        continue
                 except (json.JSONDecodeError, TypeError):
                     continue
                     
@@ -253,23 +302,21 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
                     })
             
             # Verificar si hay más páginas
-            next_token = page.get('NextToken')
+            next_token = page.get('NextToken') if isinstance(page, dict) else None
             if not next_token:
                 break
         
-        # Solo mostrar si hay eventos procesados
-        if filtered_events > 0:
-            print(f"CloudTrail {region}: {filtered_events} eventos importantes encontrados")
+        # Mostrar resultados para debugging
+        if total_events > 0:
+            print(f"CloudTrail {region}: {total_events} total, {filtered_events} importantes")
         
         return {"events": events}
     except Exception as e:
-        error_msg = str(e)
-        if "ThrottlingException" not in error_msg and "Rate exceeded" not in error_msg:
-            print(f"CloudTrail ERROR {region}: {error_msg}")
+        print(f"CloudTrail ERROR {region}: {str(e)}")
         return {"events": []}
 
 def insert_or_update_cloudtrail_events(events_data):
-    if not events_data:
+    if not events_data or not isinstance(events_data, list):
         return {"processed": 0, "inserted": 0, "updated": 0}
     
     from services.utils import get_db_connection
@@ -282,23 +329,25 @@ def insert_or_update_cloudtrail_events(events_data):
         inserted = 0
         
         for event in events_data:
+            if not isinstance(event, dict):
+                continue
+                
             try:
                 cursor.execute("""
                     INSERT INTO cloudtrail_events 
                     (event_id, event_time, event_name, event_source, user_name, resource_name, resource_type, region, changes, account_id, account_name, created_at)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
                     ON CONFLICT (event_id) DO NOTHING
-                """, (event['event_id'], event['event_time'], event['event_name'], event['event_source'], 
-                     event['user_name'], event['resource_name'], event['resource_type'], event['region'], 
-                     event['changes'], event['account_id'], event['account_name']))
+                """, (event.get('event_id', ''), event.get('event_time'), event.get('event_name', ''), 
+                     event.get('event_source', ''), event.get('user_name', ''), event.get('resource_name', ''), 
+                     event.get('resource_type', ''), event.get('region', ''), event.get('changes'), 
+                     event.get('account_id', ''), event.get('account_name', '')))
                 inserted += cursor.rowcount
-            except:
+            except Exception as insert_error:
+                print(f"Error insertando evento: {str(insert_error)}")
                 continue
         
         conn.commit()
-        
-        # No mostrar log aquí, se mostrará en el script principal
-        
         return {"processed": len(events_data), "inserted": inserted, "updated": 0}
     except Exception as e:
         conn.rollback()
