@@ -1,13 +1,16 @@
 import json
+import time
 from datetime import datetime, timedelta
 from services.utils import create_aws_client
+from botocore.exceptions import ClientError
 
 def convert_to_utc_time(utc_time):
     if isinstance(utc_time, str):
         utc_time = datetime.fromisoformat(utc_time.replace('Z', '+00:00'))
     return utc_time.replace(tzinfo=None)
 
-IMPORTANT_EVENTS = {
+# Eventos importantes - MODIFICACIONES (los que ya tenías)
+IMPORTANT_EVENTS_MODIFY = {
     "StartInstances", "StopInstances", "RebootInstances", "TerminateInstances", "ModifyInstanceAttribute", "CreateTags", "DeleteTags", "RunInstances", "AttachVolume", "DetachVolume", "CreateVolume", "DeleteVolume", "ModifyVolume",
     "CreateDBInstance", "DeleteDBInstance", "ModifyDBInstance", "RebootDBInstance", "StartDBInstance", "StopDBInstance", "CreateDBSnapshot", "DeleteDBSnapshot", "RestoreDBInstanceFromDBSnapshot", "AddTagsToResource", "RemoveTagsFromResource",
     "CreateVpc", "DeleteVpc", "ModifyVpcAttribute", "CreateSubnet", "DeleteSubnet", "ModifySubnetAttribute", "CreateRouteTable", "DeleteRouteTable", "CreateInternetGateway", "DeleteInternetGateway", "AttachInternetGateway", "DetachInternetGateway",
@@ -29,7 +32,23 @@ IMPORTANT_EVENTS = {
     "RunJobFlow", "TerminateJobFlows", "ModifyInstanceGroups", "AddInstanceGroups", "SetTerminationProtection", "AddJobFlowSteps"
 }
 
-EVENT_SOURCES = ["ec2.amazonaws.com", "rds.amazonaws.com", "redshift.amazonaws.com", "s3.amazonaws.com", "eks.amazonaws.com", "ecr.amazonaws.com", "kms.amazonaws.com", "lambda.amazonaws.com", "apigateway.amazonaws.com", "glue.amazonaws.com", "cloudformation.amazonaws.com", "ssm.amazonaws.com", "athena.amazonaws.com", "states.amazonaws.com", "transfer.amazonaws.com", "codepipeline.amazonaws.com", "elasticmapreduce.amazonaws.com"]
+# Eventos de consulta/acceso que también pueden ser útiles para auditoría
+IMPORTANT_EVENTS_READ = {
+    "AssumeRole", "GetSessionToken", "ConsoleLogin",
+    "DescribeInstances", "DescribeVolumes", "DescribeSnapshots", "DescribeImages", "DescribeSecurityGroups", "DescribeVpcs", "DescribeSubnets",
+    "DescribeDBInstances", "DescribeDBClusters", "DescribeDBSnapshots",
+    "ListBuckets", "GetBucketLocation", "GetBucketPolicy", "GetBucketTagging",
+    "DescribeClusters", "DescribeClusterSnapshots",
+    "ListFunctions", "GetFunction", "GetFunctionConfiguration",
+    "DescribeComplianceByResource", "DescribeComplianceByConfigRule",
+    "LookupEvents", "GetTrailStatus",
+    "ListTaskDefinitions", "DescribeServices", "DescribeTasks"
+}
+
+# Combinar ambos conjuntos
+IMPORTANT_EVENTS = IMPORTANT_EVENTS_MODIFY | IMPORTANT_EVENTS_READ
+
+EVENT_SOURCES = ["ec2.amazonaws.com", "rds.amazonaws.com", "redshift.amazonaws.com", "s3.amazonaws.com", "eks.amazonaws.com", "ecr.amazonaws.com", "kms.amazonaws.com", "lambda.amazonaws.com", "apigateway.amazonaws.com", "glue.amazonaws.com", "cloudformation.amazonaws.com", "ssm.amazonaws.com", "athena.amazonaws.com", "states.amazonaws.com", "transfer.amazonaws.com", "codepipeline.amazonaws.com", "elasticmapreduce.amazonaws.com", "sts.amazonaws.com", "config.amazonaws.com", "cloudtrail.amazonaws.com", "ecs.amazonaws.com", "tagging.amazonaws.com", "resource-explorer-2.amazonaws.com"]
 
 SERVICE_FIELDS = {
     "ec2.amazonaws.com": ["instanceId", "volumeId", "vpcId", "subnetId", "groupId"],
@@ -52,7 +71,7 @@ SERVICE_FIELDS = {
     "elasticmapreduce.amazonaws.com": ["clusterId", "jobFlowId", "stepId"]
 }
 
-RESOURCE_TYPES = {"ec2.amazonaws.com": "EC2", "rds.amazonaws.com": "RDS", "redshift.amazonaws.com": "Redshift", "s3.amazonaws.com": "S3", "eks.amazonaws.com": "EKS", "ecr.amazonaws.com": "ECR", "kms.amazonaws.com": "KMS", "lambda.amazonaws.com": "LAMBDA", "apigateway.amazonaws.com": "API-GATEWAY", "glue.amazonaws.com": "GLUE", "cloudformation.amazonaws.com": "CLOUDFORMATION", "cloudtrail.amazonaws.com": "CLOUDTRAIL", "ssm.amazonaws.com": "SSM", "athena.amazonaws.com": "ATHENA", "states.amazonaws.com": "STEP-FUNCTIONS", "transfer.amazonaws.com": "TRANSFER-FAMILY", "codepipeline.amazonaws.com": "CODEPIPELINE", "elasticmapreduce.amazonaws.com": "EMR"}
+RESOURCE_TYPES = {"ec2.amazonaws.com": "EC2", "rds.amazonaws.com": "RDS", "redshift.amazonaws.com": "Redshift", "s3.amazonaws.com": "S3", "eks.amazonaws.com": "EKS", "ecr.amazonaws.com": "ECR", "kms.amazonaws.com": "KMS", "lambda.amazonaws.com": "LAMBDA", "apigateway.amazonaws.com": "API-GATEWAY", "glue.amazonaws.com": "GLUE", "cloudformation.amazonaws.com": "CLOUDFORMATION", "cloudtrail.amazonaws.com": "CLOUDTRAIL", "ssm.amazonaws.com": "SSM", "athena.amazonaws.com": "ATHENA", "states.amazonaws.com": "STEP-FUNCTIONS", "transfer.amazonaws.com": "TRANSFER-FAMILY", "codepipeline.amazonaws.com": "CODEPIPELINE", "elasticmapreduce.amazonaws.com": "EMR", "sts.amazonaws.com": "STS", "config.amazonaws.com": "CONFIG", "ecs.amazonaws.com": "ECS", "tagging.amazonaws.com": "TAGGING", "resource-explorer-2.amazonaws.com": "RESOURCE-EXPLORER"}
 
 def extract_resource_name(event_detail):
     req = event_detail.get("requestParameters", {})
@@ -173,28 +192,43 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
     if not cloudtrail_client:
         return {"events": []}
 
+    def make_request_with_backoff(params, max_retries=5):
+        """Realiza request con backoff exponencial para manejar throttling"""
+        for attempt in range(max_retries):
+            try:
+                return cloudtrail_client.lookup_events(**params)
+            except ClientError as e:
+                if e.response['Error']['Code'] == 'ThrottlingException':
+                    if attempt < max_retries - 1:
+                        wait_time = (2 ** attempt) + (attempt * 0.5)  # Backoff exponencial
+                        time.sleep(wait_time)
+                        continue
+                raise e
+        return None
+
     try:
         start_time = datetime.now() - timedelta(days=30)
         events = []
         total_events = 0
         filtered_events = 0
         
-        # Obtener múltiples páginas manualmente
         next_token = None
         pages_processed = 0
-        max_pages = 5000  
+        max_pages = 1000
         
         while pages_processed < max_pages:
             params = {
                 'StartTime': start_time,
                 'EndTime': datetime.now(),
-                'MaxResults': 50
+                'MaxResults': 50  
             }
             if next_token:
                 params['NextToken'] = next_token
             
-            page = cloudtrail_client.lookup_events(**params)
-            print(page)
+            page = make_request_with_backoff(params)
+            if not page:
+                break
+                
             pages_processed += 1
             
             for event in page.get('Events', []):
@@ -203,12 +237,10 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
                 event_name = event_detail.get('eventName', '')
                 event_source = event_detail.get('eventSource', '')
                 
-                # Solo filtrar por eventos importantes, sin validar recursos
                 if event_name in IMPORTANT_EVENTS and event_source in EVENT_SOURCES:
                     filtered_events += 1
                     resource_name = extract_resource_name(event_detail)
                     
-                    # Insertar TODOS los eventos importantes, sin filtro de recursos
                     events.append({
                         'event_id': event_detail.get('eventID', ''),
                         'event_time': convert_to_utc_time(event_detail.get('eventTime')),
@@ -223,12 +255,13 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
                         'account_name': account_name
                     })
             
-            # Verificar si hay más páginas
             next_token = page.get('NextToken')
             if not next_token:
                 break
-        print(f"DEBUG CloudTrail {total_events}")
-        # Debug temporal - mostrar para todas las regiones con eventos
+                
+            # Pausa entre requests para evitar throttling
+            time.sleep(0.2)
+        
         if total_events > 0:
             print(f"DEBUG CloudTrail {region}/{account_id}: {total_events} total, {filtered_events} importantes, {len(events)} insertados")
         
