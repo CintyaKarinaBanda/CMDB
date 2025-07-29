@@ -307,7 +307,7 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
                                 if changes is None:
                                     print(f"DEBUG extract_changes returned None {region}: {event_name}")
                             except Exception as e:
-                                print(f"DEBUG extract_changes error {region}: {str(e)}"
+                                print(f"DEBUG extract_changes error {region}: {str(e)}")
                             
                             event_time = None
                             try:
