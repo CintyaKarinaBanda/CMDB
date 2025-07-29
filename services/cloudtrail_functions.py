@@ -186,69 +186,172 @@ def extract_changes(event_detail):
     return json.dumps(changes) if changes else None
 
 def get_all_cloudtrail_events(region, credentials, account_id, account_name):
-    cloudtrail_client = create_aws_client("cloudtrail", region, credentials)
-    if not cloudtrail_client:
-        return {"events": []}
-
     try:
+        cloudtrail_client = create_aws_client("cloudtrail", region, credentials)
+        if not cloudtrail_client:
+            return {"events": []}
+
         start_time = datetime.now() - timedelta(days=3)
         events = []
         total_events = 0
         filtered_events = 0
         
-        # Obtener múltiples páginas manualmente
         next_token = None
         pages_processed = 0
-        max_pages = 5000  
+        max_pages = 10
         
         while pages_processed < max_pages:
-            params = {
-                'StartTime': start_time,
-                'EndTime': datetime.now(),
-                'MaxResults': 50
-            }
-            if next_token:
-                params['NextToken'] = next_token
-            
-            page = cloudtrail_client.lookup_events(**params)
-            pages_processed += 1
-            
-            for event in page.get('Events', []):
-                total_events += 1
-                event_detail = json.loads(event.get('CloudTrailEvent', '{}'))
-                event_name = event_detail.get('eventName', '')
-                event_source = event_detail.get('eventSource', '')
+            try:
+                params = {
+                    'StartTime': start_time,
+                    'EndTime': datetime.now(),
+                    'MaxResults': 20
+                }
+                if next_token:
+                    params['NextToken'] = next_token
                 
-                # Solo filtrar por eventos importantes, sin validar recursos
-                if event_name in IMPORTANT_EVENTS and event_source in EVENT_SOURCES:
-                    filtered_events += 1
-                    resource_name = extract_resource_name(event_detail)
+                # Request con manejo de throttling
+                for attempt in range(3):
+                    try:
+                        page = cloudtrail_client.lookup_events(**params)
+                        break
+                    except ClientError as e:
+                        if e.response.get('Error', {}).get('Code') == 'ThrottlingException' and attempt < 2:
+                            time.sleep((2 ** attempt) + 1)
+                            continue
+                        else:
+                            raise e
+                else:
+                    break
                     
-                    # Insertar TODOS los eventos importantes, sin filtro de recursos
-                    events.append({
-                        'event_id': event_detail.get('eventID', ''),
-                        'event_time': convert_to_utc_time(event_detail.get('eventTime')),
-                        'event_name': event_name,
-                        'event_source': event_source,
-                        'user_name': extract_user_name(event_detail),
-                        'resource_name': resource_name if resource_name != 'unknown' else event_name.lower(),
-                        'resource_type': RESOURCE_TYPES.get(event_source, 'UNKNOWN'),
-                        'region': event_detail.get('awsRegion', region),
-                        'changes': extract_changes(event_detail),
-                        'account_id': account_id,
-                        'account_name': account_name
-                    })
-            
-            # Verificar si hay más páginas
-            next_token = page.get('NextToken')
-            if not next_token:
+                if not page or not isinstance(page, dict):
+                    break
+                    
+                pages_processed += 1
+                events_list = page.get('Events', [])
+                
+                if not events_list:
+                    break
+                
+                for event in events_list:
+                    try:
+                        if not event or not isinstance(event, dict):
+                            continue
+                            
+                        total_events += 1
+                        cloudtrail_event = event.get('CloudTrailEvent', '{}')
+                        
+                        if not cloudtrail_event:
+                            continue
+                            
+                        try:
+                            event_detail = json.loads(cloudtrail_event)
+                        except Exception as e:
+                            print(f"DEBUG JSON parse error {region}: {str(e)}")
+                            continue
+                            
+                        if not event_detail:
+                            print(f"DEBUG Empty event_detail {region}")
+                            continue
+                            
+                        if not isinstance(event_detail, dict):
+                            print(f"DEBUG Invalid event_detail type {region}: {type(event_detail)}")
+                            continue
+                            
+                        event_name = event_detail.get('eventName', '')
+                        event_source = event_detail.get('eventSource', '')
+                        
+                        if not event_name:
+                            print(f"DEBUG Missing eventName {region}: {event_detail.keys()}")
+                            continue
+                            
+                        if not event_source:
+                            print(f"DEBUG Missing eventSource {region}: {event_name}")
+                            continue
+                            
+                        # Debug: verificar si las constantes existen
+                        if IMPORTANT_EVENTS is None:
+                            print(f"DEBUG IMPORTANT_EVENTS is None {region}")
+                            continue
+                            
+                        if EVENT_SOURCES is None:
+                            print(f"DEBUG EVENT_SOURCES is None {region}")
+                            continue
+                        
+                        if event_name in IMPORTANT_EVENTS and event_source in EVENT_SOURCES:
+                            filtered_events += 1
+                            
+                            # Extraer datos con validación y debugging
+                            resource_name = 'unknown'
+                            user_name = 'system'
+                            changes = None
+                            
+                            try:
+                                resource_name = extract_resource_name(event_detail)
+                                if resource_name is None:
+                                    print(f"DEBUG extract_resource_name returned None {region}: {event_name}")
+                                    resource_name = 'unknown'
+                            except Exception as e:
+                                print(f"DEBUG extract_resource_name error {region}: {str(e)}")
+                                
+                            try:
+                                user_name = extract_user_name(event_detail)
+                                if user_name is None:
+                                    print(f"DEBUG extract_user_name returned None {region}: {event_name}")
+                                    user_name = 'system'
+                            except Exception as e:
+                                print(f"DEBUG extract_user_name error {region}: {str(e)}")
+                                
+                            try:
+                                changes = extract_changes(event_detail)
+                                if changes is None:
+                                    print(f"DEBUG extract_changes returned None {region}: {event_name}")
+                            except Exception as e:
+                                print(f"DEBUG extract_changes error {region}: {str(e)}"
+                            
+                            event_time = None
+                            try:
+                                raw_time = event_detail.get('eventTime')
+                                if raw_time is None:
+                                    print(f"DEBUG eventTime is None {region}: {event_name}")
+                                    event_time = datetime.now()
+                                else:
+                                    event_time = convert_to_utc_time(raw_time)
+                            except Exception as e:
+                                print(f"DEBUG convert_to_utc_time error {region}: {str(e)}")
+                                event_time = datetime.now()
+                            
+                            events.append({
+                                'event_id': event_detail.get('eventID', ''),
+                                'event_time': event_time,
+                                'event_name': event_name,
+                                'event_source': event_source,
+                                'user_name': user_name,
+                                'resource_name': resource_name if resource_name != 'unknown' else event_name.lower(),
+                                'resource_type': RESOURCE_TYPES.get(event_source, 'UNKNOWN'),
+                                'region': event_detail.get('awsRegion', region),
+                                'changes': changes,
+                                'account_id': account_id,
+                                'account_name': account_name
+                            })
+                    except Exception as e:
+                        continue
+                
+                next_token = page.get('NextToken')
+                if not next_token:
+                    break
+                    
+                time.sleep(0.5)
+                
+            except Exception as e:
+                print(f"DEBUG CloudTrail page ERROR {region}: {str(e)}")
                 break
-        print(f"DEBUG CloudTrail {total_events}")
-        # Debug temporal - mostrar para todas las regiones con eventos
+        
         if total_events > 0:
             print(f"DEBUG CloudTrail {region}/{account_id}: {total_events} total, {filtered_events} importantes, {len(events)} insertados")
         
         return {"events": events}
+        
     except Exception as e:
         print(f"DEBUG CloudTrail ERROR {region}: {str(e)}")
         return {"events": []}
