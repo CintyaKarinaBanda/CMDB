@@ -160,20 +160,19 @@ def insert_or_update_lambda_data(lambda_data):
             for func in lambda_data:
                 processed += 1
                 key = (func["FunctionName"], func["AccountID"])
-                values = (
-                    func["AccountName"], func["AccountID"], func["FunctionID"], func["FunctionName"],
-                    func["Description"], func["Handler"], func["Runtime"], func["MemorySize"],
-                    func["Timeout"], func["Role"], func["Environment"], func["Triggers"],
-                    func["VPCConfig"], func["Region"], func["Tags"]
-                )
 
                 if key not in existing:
                     cursor.execute("""
                         INSERT INTO lambda_functions
-                        (AccountName, AccountID, FunctionID, FunctionName, Description, Handler,
+                        (AccountName, AccountID, FunctionName, Description, Handler,
                         Runtime, MemorySize, Timeout, Role, Environment, Triggers, VPCConfig, Region, Tags, last_updated)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
-                    """, values)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                    """, (
+                        func["AccountName"], func["AccountID"], func["FunctionName"],
+                        func["Description"], func["Handler"], func["Runtime"], func["MemorySize"],
+                        func["Timeout"], func["Role"], func["Environment"], func["Triggers"],
+                        func["VPCConfig"], func["Region"], func["Tags"]
+                    ))
                     inserted += 1
                 else:
                     # Siempre actualizar last_updated para indicar que el item aún existe
