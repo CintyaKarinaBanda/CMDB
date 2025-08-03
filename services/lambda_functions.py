@@ -151,7 +151,7 @@ def get_lambda_tags(lambda_client, function_arn):
     except ClientError:
         return {}
 
-def extract_lambda_data(function, lambda_client, account_name, account_id, region):
+def extract_lambda_data(function, lambda_client, account_name, account_id, region, credentials):
     function_name = function["FunctionName"]
     function_arn = function.get("FunctionArn", "")
     try:
@@ -163,7 +163,7 @@ def extract_lambda_data(function, lambda_client, account_name, account_id, regio
     vpc_info = (f"VPC:{vpc_config.get('VpcId', 'N/A')},Subnets:{len(vpc_config.get('SubnetIds', []))}"
                 if vpc_config.get('VpcId') else "N/A")
     env_vars_count = len(config.get("Environment", {}).get("Variables", {}))
-    triggers = get_lambda_triggers(lambda_client, function_name)
+    triggers = get_lambda_triggers(lambda_client, function_name, function_arn, region, credentials)
     tags = get_lambda_tags(lambda_client, function_arn)
 
     return {
@@ -194,7 +194,7 @@ def get_lambda_functions(region, credentials, account_id, account_name):
         for page in paginator.paginate():
             for function in page.get("Functions", []):
                 try:
-                    data = extract_lambda_data(function, lambda_client, account_name, account_id, region)
+                    data = extract_lambda_data(function, lambda_client, account_name, account_id, region, credentials)
                     functions_info.append(data)
                 except Exception:
                     continue
@@ -235,6 +235,7 @@ def insert_or_update_lambda_data(lambda_data):
                     """, values)
                     inserted += 1
                 else:
+                    # Siempre actualizar last_updated para indicar que el item aún existe
                     cursor.execute("""
                         UPDATE lambda_functions
                         SET AccountName=%s, Description=%s, Handler=%s, Runtime=%s,
