@@ -116,28 +116,38 @@ def extract_lambda_data(function, lambda_client, account_name, account_id, regio
     }
 
 def get_lambda_functions(region, credentials, account_id, account_name):
+    print(f"[LAMBDA] Procesando cuenta: {account_name} ({account_id}) en región: {region}")
     lambda_client = create_aws_client("lambda", region, credentials)
     if not lambda_client:
+        print(f"[LAMBDA] ERROR: No se pudo crear cliente para {account_name} en {region}")
         return []
     functions_info = []
     try:
         paginator = lambda_client.get_paginator('list_functions')
+        function_count = 0
         for page in paginator.paginate():
             for function in page.get("Functions", []):
                 try:
                     data = extract_lambda_data(function, lambda_client, account_name, account_id, region, credentials)
                     functions_info.append(data)
-                except Exception:
+                    function_count += 1
+                except Exception as e:
+                    print(f"[LAMBDA] Error procesando función {function.get('FunctionName', 'unknown')}: {str(e)}")
                     continue
+        print(f"[LAMBDA] Encontradas {function_count} funciones en {account_name} ({region})")
         return functions_info
-    except ClientError:
+    except ClientError as e:
+        print(f"[LAMBDA] Error de cliente para {account_name} en {region}: {str(e)}")
         return []
 
 def insert_or_update_lambda_data(lambda_data):
     if not lambda_data:
+        print("[LAMBDA] No hay datos para procesar")
         return {"processed": 0, "inserted": 0, "updated": 0}
+    print(f"[LAMBDA] Procesando {len(lambda_data)} funciones Lambda")
     conn = get_db_connection()
     if not conn:
+        print("[LAMBDA] ERROR: Fallo en conexión a BD")
         return {"error": "DB connection failed", "processed": 0, "inserted": 0, "updated": 0}
 
     inserted = updated = processed = 0
@@ -181,8 +191,10 @@ def insert_or_update_lambda_data(lambda_data):
                     ))
                     updated += 1
             conn.commit()
-        return {"processed": processed, "inserted": inserted, "updated": updated}
+        print(f"[LAMBDA] BD: {inserted} insertados, {updated} actualizados de {processed} procesados")
+        return {"processed": processed, "inserted": inserted, "updated": updated} "inserted": inserted, "updated": updated}
     except Exception as e:
+        print(f"[LAMBDA] ERROR en BD: {str(e)}")
         conn.rollback()
         return {"error": str(e), "processed": 0, "inserted": 0, "updated": 0}
     finally:
