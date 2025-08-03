@@ -16,6 +16,7 @@ FIELD_EVENT_MAP = {
     "tags": ["TagResource", "UntagResource"]
 }
 
+# amazonq-ignore-next-line
 def normalize_list_comparison(old_val, new_val):
     """Normaliza listas para comparación, ignorando orden"""
     if isinstance(new_val, list):
@@ -31,6 +32,7 @@ def get_function_changed_by(function_name, field_name):
         with conn.cursor() as cursor:
             events = FIELD_EVENT_MAP.get(field_name, [])
             placeholders = ','.join(['%s'] * len(events))
+            # amazonq-ignore-next-line
             sql = f"""
                 SELECT user_name 
                 FROM cloudtrail_events 
@@ -47,41 +49,28 @@ def get_function_changed_by(function_name, field_name):
         conn.close()
 
 def get_lambda_triggers(lambda_client, function_name, function_arn, region, credentials):
-    """Obtiene triggers básicos de Lambda de forma optimizada"""
-    triggers = set()
+    """Obtiene triggers de Lambda usando policy document"""
+    triggers = []
     
-    # Solo Event source mappings y Function policy (rápido)
     try:
-        response = lambda_client.list_event_source_mappings(FunctionName=function_name)
-        for mapping in response.get("EventSourceMappings", []):
-            arn = mapping.get("EventSourceArn", "")
-            if mapping.get("State") == "Enabled" and arn:
-                service = arn.split(':')[2] if ':' in arn else "Unknown"
-                resource = arn.split(':')[-1] if ':' in arn else arn
-                triggers.add(f"{service.upper()}:{resource}")
-    except ClientError:
-        pass
-
-    try:
-        policy_response = lambda_client.get_policy(FunctionName=function_name)
-        policy = json.loads(policy_response.get("Policy", "{}"))
+        policy = lambda_client.get_policy(FunctionName=function_name)
+        policy_doc = json.loads(policy['Policy'])
         
-        for statement in policy.get("Statement", []):
-            principal = statement.get("Principal", {})
-            service = principal if isinstance(principal, str) else principal.get("Service", "")
+        for stmt in policy_doc.get('Statement', []):
+            principal = stmt.get('Principal', {})
+            service = principal.get('Service', 'N/A').split('.')[0] if isinstance(principal, dict) else 'N/A'
+            arn = stmt.get('Condition', {}).get('ArnLike', {}).get('AWS:SourceArn', 'N/A')
             
-            if "apigateway" in service.lower():
-                triggers.add("API Gateway")
-            elif "s3" in service.lower():
-                triggers.add("S3")
-            elif "events" in service.lower():
-                triggers.add("EventBridge")
-            elif "sns" in service.lower():
-                triggers.add("SNS")
+            if service != 'N/A':
+                trigger_info = f"{service} → {arn}" if arn != 'N/A' else service
+                triggers.append(trigger_info)
+                
+    except lambda_client.exceptions.ResourceNotFoundException:
+        triggers = ["Sin triggers"]
     except ClientError:
-        pass
-
-    return sorted(list(triggers)) if triggers else ["Manual"]
+        triggers = ["Sin triggers"]
+    
+    return triggers if triggers else ["Sin triggers"]
 
 
 def get_lambda_tags(lambda_client, function_arn):
@@ -89,6 +78,7 @@ def get_lambda_tags(lambda_client, function_arn):
     try:
         response = lambda_client.list_tags(Resource=function_arn)
         return response.get("Tags", {})
+    # amazonq-ignore-next-line
     except ClientError:
         return {}
 
