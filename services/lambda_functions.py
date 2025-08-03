@@ -192,7 +192,7 @@ def insert_or_update_lambda_data(lambda_data):
                     updated += 1
             conn.commit()
         print(f"[LAMBDA] BD: {inserted} insertados, {updated} actualizados de {processed} procesados")
-        return {"processed": processed, "inserted": inserted, "updated": updated} "inserted": inserted, "updated": updated}
+        return {"processed": processed, "inserted": inserted, "updated": updated}
     except Exception as e:
         print(f"[LAMBDA] ERROR en BD: {str(e)}")
         conn.rollback()
