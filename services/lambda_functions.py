@@ -47,42 +47,28 @@ def get_function_changed_by(function_name, field_name):
         conn.close()
 
 def get_lambda_triggers(lambda_client, function_name, function_arn, region, credentials):
-    """Obtiene todos los triggers asociados a la función Lambda"""
+    """Obtiene triggers básicos de Lambda de forma optimizada"""
     triggers = set()
     
-    # Event source mappings (código existente)
+    # Solo Event source mappings y Function policy (rápido)
     try:
         response = lambda_client.list_event_source_mappings(FunctionName=function_name)
         for mapping in response.get("EventSourceMappings", []):
             arn = mapping.get("EventSourceArn", "")
-            state = mapping.get("State", "")
-            if state == "Enabled" and arn:
-                if "sqs" in arn.lower():
-                    triggers.add(f"SQS:{arn.split(':')[-1]}")
-                elif "dynamodb" in arn.lower():
-                    triggers.add(f"DynamoDB:{arn.split('/')[-1]}")
-                elif "kinesis" in arn.lower():
-                    triggers.add(f"Kinesis:{arn.split('/')[-1]}")
-                else:
-                    service_type = arn.split(':')[2] if ':' in arn else "Unknown"
-                    triggers.add(f"{service_type.upper()}:{arn.split(':')[-1] if ':' in arn else arn}")
+            if mapping.get("State") == "Enabled" and arn:
+                service = arn.split(':')[2] if ':' in arn else "Unknown"
+                resource = arn.split(':')[-1] if ':' in arn else arn
+                triggers.add(f"{service.upper()}:{resource}")
     except ClientError:
         pass
 
-    # Function policy (código existente)
     try:
         policy_response = lambda_client.get_policy(FunctionName=function_name)
         policy = json.loads(policy_response.get("Policy", "{}"))
         
         for statement in policy.get("Statement", []):
             principal = statement.get("Principal", {})
-            
-            if isinstance(principal, str):
-                service = principal
-            elif isinstance(principal, dict):
-                service = principal.get("Service", "")
-            else:
-                continue
+            service = principal if isinstance(principal, str) else principal.get("Service", "")
             
             if "apigateway" in service.lower():
                 triggers.add("API Gateway")
@@ -95,52 +81,7 @@ def get_lambda_triggers(lambda_client, function_name, function_arn, region, cred
     except ClientError:
         pass
 
-    # NUEVO: Verificar EventBridge Rules
-    try:
-        events_client = create_aws_client("events", region, credentials)
-        if events_client:
-            paginator = events_client.get_paginator('list_rules')
-            for page in paginator.paginate():
-                for rule in page.get('Rules', []):
-                    if rule.get('State') == 'ENABLED':
-                        try:
-                            targets = events_client.list_targets_by_rule(Rule=rule['Name'])
-                            for target in targets.get('Targets', []):
-                                if target.get('Arn') == function_arn:
-                                    triggers.add(f"EventBridge:{rule['Name']}")
-                        except ClientError:
-                            continue
-    except:
-        pass
-
-    # NUEVO: Verificar API Gateway
-    try:
-        apigateway_client = create_aws_client("apigateway", region, credentials)
-        if apigateway_client:
-            apis = apigateway_client.get_rest_apis()
-            for api in apis.get('items', []):
-                api_id = api['id']
-                try:
-                    resources = apigateway_client.get_resources(restApiId=api_id)
-                    for resource in resources.get('items', []):
-                        for method_name, method in resource.get('resourceMethods', {}).items():
-                            try:
-                                method_details = apigateway_client.get_method(
-                                    restApiId=api_id,
-                                    resourceId=resource['id'],
-                                    httpMethod=method_name
-                                )
-                                integration = method_details.get('methodIntegration', {})
-                                if integration.get('uri', '').endswith(function_name):
-                                    triggers.add(f"API Gateway:{api_id}")
-                            except ClientError:
-                                continue
-                except ClientError:
-                    continue
-    except:
-        pass
-
-    return sorted(list(triggers)) if triggers else ["Manual/Unknown"]
+    return sorted(list(triggers)) if triggers else ["Manual"]
 
 
 def get_lambda_tags(lambda_client, function_arn):

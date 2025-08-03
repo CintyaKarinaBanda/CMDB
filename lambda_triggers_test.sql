@@ -17,6 +17,7 @@ SELECT
 FROM ec2 e
 JOIN subnets s ON e.subnet = s.subnetid
 WHERE e.accountid = '729694432199'
+  AND DATE(e.last_updated) = CURRENT_DATE
 
 UNION ALL
 
@@ -37,6 +38,7 @@ FROM lambda_functions l
 JOIN subnets s ON split_part(split_part(l.vpcconfig, ':', 3), ',', 1) = s.subnetid
 WHERE l.accountid = '729694432199'
   AND l.vpcconfig LIKE 'VPC:%'
+  AND DATE(l.last_updated) = CURRENT_DATE
 
 UNION ALL
 
@@ -56,6 +58,8 @@ SELECT
 FROM subnets s
 JOIN vpcs v ON s.vpcid = v.vpc_id
 WHERE s.accountid = '729694432199'
+  AND DATE(s.last_updated) = CURRENT_DATE
+  AND DATE(v.last_updated) = CURRENT_DATE
 
 UNION ALL
 
@@ -163,6 +167,7 @@ WHERE l.accountid = '729694432199'
   AND l.triggers != '["Manual"]'
   AND trigger_clean != ''
   AND trigger_clean != 'Manual'
+  AND DATE(l.last_updated) = CURRENT_DATE
 
 UNION ALL
 
@@ -184,5 +189,6 @@ WHERE l.accountid = '729694432199'
   AND l.vpcconfig IS NOT NULL 
   AND l.vpcconfig LIKE 'VPC:%'
   AND l.vpcconfig != 'VPC:N/A'
+  AND DATE(l.last_updated) = CURRENT_DATE
 
 ORDER BY relationship_type, relationship_subtype, source_name;
