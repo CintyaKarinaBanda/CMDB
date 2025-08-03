@@ -153,42 +153,37 @@ def insert_or_update_lambda_data(lambda_data):
     inserted = updated = processed = 0
     try:
         with conn.cursor() as cursor:
-            cursor.execute("SELECT * FROM lambda_functions")
-            columns = [desc[0].lower() for desc in cursor.description]
-            existing = {(row[columns.index("functionname")], row[columns.index("accountid")]): dict(zip(columns, row)) for row in cursor.fetchall()}
-
             for func in lambda_data:
                 processed += 1
-                key = (func["FunctionName"], func["AccountID"])
-
-                if key not in existing:
-                    cursor.execute("""
-                        INSERT INTO lambda_functions
-                        (AccountName, AccountID, FunctionName, Description, Handler,
-                        Runtime, MemorySize, Timeout, Role, Environment, Triggers, VPCConfig, Region, Tags, last_updated)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
-                    """, (
-                        func["AccountName"], func["AccountID"], func["FunctionName"],
-                        func["Description"], func["Handler"], func["Runtime"], func["MemorySize"],
-                        func["Timeout"], func["Role"], func["Environment"], func["Triggers"],
-                        func["VPCConfig"], func["Region"], func["Tags"]
-                    ))
-                    inserted += 1
-                else:
-                    # Siempre actualizar last_updated para indicar que el item aún existe
-                    cursor.execute("""
-                        UPDATE lambda_functions
-                        SET AccountName=%s, Description=%s, Handler=%s, Runtime=%s,
-                            MemorySize=%s, Timeout=%s, Role=%s, Environment=%s,
-                            Triggers=%s, VPCConfig=%s, Region=%s, Tags=%s, last_updated=NOW()
-                        WHERE FunctionName=%s AND AccountID=%s
-                    """, (
-                        func["AccountName"], func["Description"], func["Handler"], func["Runtime"],
-                        func["MemorySize"], func["Timeout"], func["Role"], func["Environment"],
-                        func["Triggers"], func["VPCConfig"], func["Region"], func["Tags"],
-                        func["FunctionName"], func["AccountID"]
-                    ))
-                    updated += 1
+                # Usar UPSERT de PostgreSQL para manejar duplicados
+                cursor.execute("""
+                    INSERT INTO lambda_functions
+                    (AccountName, AccountID, FunctionName, Description, Handler,
+                    Runtime, MemorySize, Timeout, Role, Environment, Triggers, VPCConfig, Region, Tags, last_updated)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                    ON CONFLICT (FunctionName) DO UPDATE SET
+                        AccountName=EXCLUDED.AccountName,
+                        AccountID=EXCLUDED.AccountID,
+                        Description=EXCLUDED.Description,
+                        Handler=EXCLUDED.Handler,
+                        Runtime=EXCLUDED.Runtime,
+                        MemorySize=EXCLUDED.MemorySize,
+                        Timeout=EXCLUDED.Timeout,
+                        Role=EXCLUDED.Role,
+                        Environment=EXCLUDED.Environment,
+                        Triggers=EXCLUDED.Triggers,
+                        VPCConfig=EXCLUDED.VPCConfig,
+                        Region=EXCLUDED.Region,
+                        Tags=EXCLUDED.Tags,
+                        last_updated=NOW()
+                """, (
+                    func["AccountName"], func["AccountID"], func["FunctionName"],
+                    func["Description"], func["Handler"], func["Runtime"], func["MemorySize"],
+                    func["Timeout"], func["Role"], func["Environment"], func["Triggers"],
+                    func["VPCConfig"], func["Region"], func["Tags"]
+                ))
+                # PostgreSQL no nos dice si fue INSERT o UPDATE, así que contamos como actualizado
+                updated += 1
             conn.commit()
         print(f"[LAMBDA] BD: {inserted} insertados, {updated} actualizados de {processed} procesados")
         return {"processed": processed, "inserted": inserted, "updated": updated}
