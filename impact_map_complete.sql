@@ -63,110 +63,83 @@ WHERE s.accountid = $1
 
 UNION ALL
 
--- Lambda Triggers - Todos los tipos
+-- Lambda Triggers - Simplified parsing
 SELECT 
+    'SERVICE_INTEGRATION' as relationship_type,
     CASE 
-        WHEN trigger_clean LIKE 'SQS:%' OR trigger_clean LIKE 'DynamoDB:%' OR trigger_clean LIKE 'Kinesis:%' OR 
-             trigger_clean LIKE 'MSK:%' OR trigger_clean LIKE 'API Gateway%' OR trigger_clean LIKE 'S3:%' OR 
-             trigger_clean LIKE 'EventBridge:%' OR trigger_clean LIKE 'SNS:%' OR trigger_clean LIKE 'IoT:%' OR 
-             trigger_clean LIKE 'Cognito:%' OR trigger_clean LIKE 'Alexa:%' OR trigger_clean LIKE 'Lex:%' OR 
-             trigger_clean LIKE 'DocumentDB:%' THEN 'SERVICE_INTEGRATION'
-        ELSE 'ACCOUNT_OWNERSHIP'
-    END as relationship_type,
-    CASE 
-        WHEN trigger_clean LIKE 'SQS:%' THEN 'SQS_TO_LAMBDA'
-        WHEN trigger_clean LIKE 'DynamoDB:%' THEN 'DYNAMODB_TO_LAMBDA'
-        WHEN trigger_clean LIKE 'Kinesis:%' THEN 'KINESIS_TO_LAMBDA'
-        WHEN trigger_clean LIKE 'MSK:%' THEN 'MSK_TO_LAMBDA'
-        WHEN trigger_clean LIKE 'API Gateway%' THEN 'APIGATEWAY_TO_LAMBDA'
-        WHEN trigger_clean LIKE 'S3:%' THEN 'S3_TO_LAMBDA'
-        WHEN trigger_clean LIKE 'EventBridge:%' THEN 'EVENTBRIDGE_TO_LAMBDA'
-        WHEN trigger_clean LIKE 'SNS:%' THEN 'SNS_TO_LAMBDA'
-        WHEN trigger_clean LIKE 'IoT:%' THEN 'IOT_TO_LAMBDA'
-        WHEN trigger_clean LIKE 'Cognito:%' THEN 'COGNITO_TO_LAMBDA'
-        WHEN trigger_clean LIKE 'Alexa:%' THEN 'ALEXA_TO_LAMBDA'
-        WHEN trigger_clean LIKE 'Lex:%' THEN 'LEX_TO_LAMBDA'
-        WHEN trigger_clean LIKE 'DocumentDB:%' THEN 'DOCUMENTDB_TO_LAMBDA'
-        ELSE 'LAMBDA_TO_ACCOUNT'
+        WHEN trigger_clean LIKE 'apigateway %' THEN 'APIGATEWAY_TO_LAMBDA'
+        WHEN trigger_clean LIKE 's3 %' THEN 'S3_TO_LAMBDA'
+        WHEN trigger_clean LIKE 'events %' THEN 'EVENTBRIDGE_TO_LAMBDA'
+        WHEN trigger_clean LIKE 'sns %' THEN 'SNS_TO_LAMBDA'
+        WHEN trigger_clean LIKE 'iot %' THEN 'IOT_TO_LAMBDA'
+        WHEN trigger_clean LIKE 'cognito-idp %' THEN 'COGNITO_TO_LAMBDA'
+        WHEN trigger_clean LIKE 'lex %' THEN 'LEX_TO_LAMBDA'
+        WHEN trigger_clean LIKE 'lexv2 %' THEN 'LEXV2_TO_LAMBDA'
+        WHEN trigger_clean = 'alexa-connectedhome' THEN 'ALEXA_TO_LAMBDA'
+        WHEN trigger_clean = 'alexa-appkit' THEN 'ALEXA_TO_LAMBDA'
+        WHEN trigger_clean LIKE 'cloudwatch %' THEN 'CLOUDWATCH_TO_LAMBDA'
+        WHEN trigger_clean LIKE 'elasticloadbalancing %' THEN 'ELB_TO_LAMBDA'
+        WHEN trigger_clean = 'cloudformation' THEN 'CLOUDFORMATION_TO_LAMBDA'
+        WHEN trigger_clean = 's3' THEN 'S3_TO_LAMBDA'
+        WHEN trigger_clean = 'events' THEN 'EVENTBRIDGE_TO_LAMBDA'
+        ELSE 'OTHER_TO_LAMBDA'
     END as relationship_subtype,
     CASE 
-        WHEN trigger_clean LIKE 'SQS:%' OR trigger_clean LIKE 'DynamoDB:%' OR trigger_clean LIKE 'Kinesis:%' OR 
-             trigger_clean LIKE 'MSK:%' OR trigger_clean LIKE 'API Gateway%' OR trigger_clean LIKE 'S3:%' OR 
-             trigger_clean LIKE 'EventBridge:%' OR trigger_clean LIKE 'SNS:%' OR trigger_clean LIKE 'IoT:%' OR 
-             trigger_clean LIKE 'Cognito:%' OR trigger_clean LIKE 'Alexa:%' OR trigger_clean LIKE 'Lex:%' OR 
-             trigger_clean LIKE 'DocumentDB:%' THEN COALESCE(NULLIF(SUBSTRING(trigger_clean FROM '.*:(.*)'), ''), trigger_clean)
-        ELSE l.functionname
+        WHEN trigger_clean LIKE '%arn:aws:s3:::%' THEN 
+            SPLIT_PART(SPLIT_PART(trigger_clean, 'arn:aws:s3:::', 2), ' ', 1)
+        WHEN trigger_clean LIKE '%arn:aws:execute-api:%' THEN 
+            SPLIT_PART(trigger_clean, ':', 6)
+        WHEN trigger_clean LIKE '%arn:aws:events:%' THEN 
+            SPLIT_PART(SPLIT_PART(trigger_clean, ':', 6), '/', 2)
+        WHEN trigger_clean LIKE '%arn:aws:sns:%' THEN 
+            SPLIT_PART(trigger_clean, ':', 6)
+        WHEN trigger_clean LIKE '%arn:aws:iot:%' THEN 
+            SPLIT_PART(SPLIT_PART(trigger_clean, ':', 6), '/', 2)
+        WHEN trigger_clean LIKE '%arn:aws:cognito-idp:%' THEN 
+            SPLIT_PART(trigger_clean, '/', 2)
+        WHEN trigger_clean LIKE '%arn:aws:lex:%' THEN 
+            SPLIT_PART(SPLIT_PART(trigger_clean, ':', 6), ':', 2)
+        ELSE trigger_clean
     END as source_name,
     CASE 
-        WHEN trigger_clean LIKE 'SQS:%' THEN 'SQS'
-        WHEN trigger_clean LIKE 'DynamoDB:%' THEN 'DYNAMODB'
-        WHEN trigger_clean LIKE 'Kinesis:%' THEN 'KINESIS'
-        WHEN trigger_clean LIKE 'MSK:%' THEN 'MSK'
-        WHEN trigger_clean LIKE 'API Gateway%' THEN 'APIGATEWAY'
-        WHEN trigger_clean LIKE 'S3:%' THEN 'S3'
-        WHEN trigger_clean LIKE 'EventBridge:%' THEN 'EVENTBRIDGE'
-        WHEN trigger_clean LIKE 'SNS:%' THEN 'SNS'
-        WHEN trigger_clean LIKE 'IoT:%' THEN 'IOT'
-        WHEN trigger_clean LIKE 'Cognito:%' THEN 'COGNITO'
-        WHEN trigger_clean LIKE 'Alexa:%' THEN 'ALEXA'
-        WHEN trigger_clean LIKE 'Lex:%' THEN 'LEX'
-        WHEN trigger_clean LIKE 'DocumentDB:%' THEN 'DOCUMENTDB'
-        ELSE 'LAMBDA'
+        WHEN trigger_clean LIKE 'apigateway %' THEN 'APIGATEWAY'
+        WHEN trigger_clean LIKE 's3 %' OR trigger_clean = 's3' THEN 'S3'
+        WHEN trigger_clean LIKE 'events %' OR trigger_clean = 'events' THEN 'EVENTBRIDGE'
+        WHEN trigger_clean LIKE 'sns %' THEN 'SNS'
+        WHEN trigger_clean LIKE 'iot %' THEN 'IOT'
+        WHEN trigger_clean LIKE 'cognito-idp %' THEN 'COGNITO'
+        WHEN trigger_clean LIKE 'lex %' THEN 'LEX'
+        WHEN trigger_clean LIKE 'lexv2 %' THEN 'LEXV2'
+        WHEN trigger_clean = 'alexa-connectedhome' OR trigger_clean = 'alexa-appkit' THEN 'ALEXA'
+        WHEN trigger_clean LIKE 'cloudwatch %' THEN 'CLOUDWATCH'
+        WHEN trigger_clean LIKE 'elasticloadbalancing %' THEN 'ELB'
+        WHEN trigger_clean = 'cloudformation' THEN 'CLOUDFORMATION'
+        ELSE 'OTHER'
     END as source_type,
     CASE 
-        WHEN trigger_clean LIKE 'SQS:%' OR trigger_clean LIKE 'DynamoDB:%' OR trigger_clean LIKE 'Kinesis:%' OR 
-             trigger_clean LIKE 'MSK:%' OR trigger_clean LIKE 'API Gateway%' OR trigger_clean LIKE 'S3:%' OR 
-             trigger_clean LIKE 'EventBridge:%' OR trigger_clean LIKE 'SNS:%' OR trigger_clean LIKE 'IoT:%' OR 
-             trigger_clean LIKE 'Cognito:%' OR trigger_clean LIKE 'Alexa:%' OR trigger_clean LIKE 'Lex:%' OR 
-             trigger_clean LIKE 'DocumentDB:%' THEN COALESCE(NULLIF(SUBSTRING(trigger_clean FROM '.*:(.*)'), ''), trigger_clean)
-        ELSE l.functionid
+        WHEN trigger_clean LIKE '%arn:%' THEN 
+            SPLIT_PART(trigger_clean, ' → ', 2)
+        ELSE trigger_clean
     END as source_id,
-    CASE 
-        WHEN trigger_clean LIKE 'SQS:%' OR trigger_clean LIKE 'DynamoDB:%' OR trigger_clean LIKE 'Kinesis:%' OR 
-             trigger_clean LIKE 'MSK:%' OR trigger_clean LIKE 'API Gateway%' OR trigger_clean LIKE 'S3:%' OR 
-             trigger_clean LIKE 'EventBridge:%' OR trigger_clean LIKE 'SNS:%' OR trigger_clean LIKE 'IoT:%' OR 
-             trigger_clean LIKE 'Cognito:%' OR trigger_clean LIKE 'Alexa:%' OR trigger_clean LIKE 'Lex:%' OR 
-             trigger_clean LIKE 'DocumentDB:%' THEN l.functionname
-        ELSE 'ACCOUNT'
-    END as target_name,
-    CASE 
-        WHEN trigger_clean LIKE 'SQS:%' OR trigger_clean LIKE 'DynamoDB:%' OR trigger_clean LIKE 'Kinesis:%' OR 
-             trigger_clean LIKE 'MSK:%' OR trigger_clean LIKE 'API Gateway%' OR trigger_clean LIKE 'S3:%' OR 
-             trigger_clean LIKE 'EventBridge:%' OR trigger_clean LIKE 'SNS:%' OR trigger_clean LIKE 'IoT:%' OR 
-             trigger_clean LIKE 'Cognito:%' OR trigger_clean LIKE 'Alexa:%' OR trigger_clean LIKE 'Lex:%' OR 
-             trigger_clean LIKE 'DocumentDB:%' THEN 'LAMBDA'
-        ELSE 'ACCOUNT'
-    END as target_type,
-    CASE 
-        WHEN trigger_clean LIKE 'SQS:%' OR trigger_clean LIKE 'DynamoDB:%' OR trigger_clean LIKE 'Kinesis:%' OR 
-             trigger_clean LIKE 'MSK:%' OR trigger_clean LIKE 'API Gateway%' OR trigger_clean LIKE 'S3:%' OR 
-             trigger_clean LIKE 'EventBridge:%' OR trigger_clean LIKE 'SNS:%' OR trigger_clean LIKE 'IoT:%' OR 
-             trigger_clean LIKE 'Cognito:%' OR trigger_clean LIKE 'Alexa:%' OR trigger_clean LIKE 'Lex:%' OR 
-             trigger_clean LIKE 'DocumentDB:%' THEN l.functionid
-        ELSE l.accountid
-    END as target_id,
-    CASE 
-        WHEN trigger_clean LIKE 'SQS:%' OR trigger_clean LIKE 'DynamoDB:%' OR trigger_clean LIKE 'Kinesis:%' OR 
-             trigger_clean LIKE 'MSK:%' OR trigger_clean LIKE 'API Gateway%' OR trigger_clean LIKE 'S3:%' OR 
-             trigger_clean LIKE 'EventBridge:%' OR trigger_clean LIKE 'SNS:%' OR trigger_clean LIKE 'IoT:%' OR 
-             trigger_clean LIKE 'Cognito:%' OR trigger_clean LIKE 'Alexa:%' OR trigger_clean LIKE 'Lex:%' OR 
-             trigger_clean LIKE 'DocumentDB:%' THEN 'TRIGGERS'
-        ELSE 'BELONGS_TO'
-    END as relationship,
+    l.functionname as target_name,
+    'LAMBDA' as target_type,
+    l.functionid as target_id,
+    'TRIGGERS' as relationship,
     l.region,
     l.accountid as account_id
-FROM lambda_functions l,
-     UNNEST(string_to_array(TRIM(BOTH '[]"' FROM REPLACE(l.triggers, '"', '')), ',')) as trigger_raw(trigger_item)
+FROM lambda_functions l
 CROSS JOIN LATERAL (
-    SELECT TRIM(trigger_item) as trigger_clean
+    SELECT UNNEST(string_to_array(
+        REPLACE(REPLACE(REPLACE(l.triggers, '["', ''), '"]', ''), '", "', '|'), 
+        '|'
+    )) as trigger_clean
 ) t
 WHERE l.accountid = $1
   AND l.triggers IS NOT NULL 
   AND l.triggers != '' 
   AND l.triggers != '[]'
-  AND l.triggers != '["Manual"]'
-  AND trigger_clean != ''
-  AND trigger_clean != 'Manual'
+  AND l.triggers NOT IN ('["Sin triggers"]', '["None"]', '["Manual"]', '0')
+  AND trigger_clean NOT IN ('Sin triggers', 'None', 'Manual', '0', '')
   AND DATE(l.last_updated) = CURRENT_DATE
 
 UNION ALL

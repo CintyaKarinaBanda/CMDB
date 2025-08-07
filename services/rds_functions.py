@@ -57,8 +57,25 @@ def get_instance_changed_by(instance_id, field_name):
     finally:
         conn.close()
 
-def extract_rds_data(db, account_name, account_id, region):
+def get_vpc_info(rds_client, db_subnet_group_name):
+    """Obtiene información de VPC desde el DB Subnet Group"""
+    if not db_subnet_group_name:
+        return "N/A"
+    
+    try:
+        response = rds_client.describe_db_subnet_groups(
+            DBSubnetGroupName=db_subnet_group_name
+        )
+        subnet_group = response['DBSubnetGroups'][0]
+        return subnet_group.get('VpcId', 'N/A')
+    except ClientError:
+        return "N/A"
+
+def extract_rds_data(db, rds_client, account_name, account_id, region):
     endpoint = db.get("Endpoint", {})
+    subnet_group = db.get("DBSubnetGroup", {})
+    subnet_group_name = subnet_group.get("DBSubnetGroupName") if subnet_group else None
+    
     return {
         "AccountName": account_name,
         "AccountID": account_id,
@@ -72,6 +89,7 @@ def extract_rds_data(db, account_name, account_id, region):
         "Region": region,
         "Endpoint": endpoint.get("Address", "N/A"),
         "Port": endpoint.get("Port", "N/A"),
+        "VPC": get_vpc_info(rds_client, subnet_group_name),
         "HasReplica": bool(db.get("ReadReplicaDBInstanceIdentifiers"))
     }
 
@@ -86,7 +104,7 @@ def get_rds_instances(region, credentials, account_id, account_name):
 
         for page in paginator.paginate():
             for db in page.get("DBInstances", []):
-                info = extract_rds_data(db, account_name, account_id, region)
+                info = extract_rds_data(db, rds_client, account_name, account_id, region)
                 instances_info.append(info)
         return instances_info
     except ClientError as e:
@@ -104,10 +122,10 @@ def insert_or_update_rds_data(rds_data):
         INSERT INTO rds (
             AccountName, AccountID, DbInstanceId, DbName, EngineType,
             EngineVersion, StorageSize, InstanceType, Status, Region,
-            Endpoint, Port, HasReplica, last_updated
+            Endpoint, Port, VPC, HasReplica, last_updated
         ) VALUES (
             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-            %s, %s, %s, CURRENT_TIMESTAMP
+            %s, %s, %s, %s, NOW()
         )
     """
 
@@ -133,11 +151,11 @@ def insert_or_update_rds_data(rds_data):
                 rds["DbName"], rds["EngineType"], rds["EngineVersion"],
                 rds["StorageSize"], rds["InstanceType"], rds["Status"],
                 rds["Region"], rds["Endpoint"], rds["Port"],
-                rds["HasReplica"]
+                rds["VPC"], rds["HasReplica"]
             )
 
             if (instance_id, rds["AccountID"]) not in existing_data:
-                cursor.execute(query_insert.replace('CURRENT_TIMESTAMP', 'NOW()'), insert_values)
+                cursor.execute(query_insert, insert_values)
                 inserted += 1
             else:
                 # Siempre actualizar last_updated para registros existentes
