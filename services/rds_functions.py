@@ -60,26 +60,37 @@ def get_instance_changed_by(instance_id, field_name):
 def get_vpc_info(rds_client, db_subnet_group_name):
     """Obtiene información de VPC desde el DB Subnet Group"""
     if not db_subnet_group_name:
+        print(f"[RDS VPC] No subnet group name found")
         return "N/A"
     
     try:
+        print(f"[RDS VPC] Consultando subnet group: {db_subnet_group_name}")
         response = rds_client.describe_db_subnet_groups(
             DBSubnetGroupName=db_subnet_group_name
         )
         subnet_group = response['DBSubnetGroups'][0]
-        return subnet_group.get('VpcId', 'N/A')
-    except ClientError:
+        vpc_id = subnet_group.get('VpcId', 'N/A')
+        print(f"[RDS VPC] VPC encontrada: {vpc_id} para subnet group: {db_subnet_group_name}")
+        return vpc_id
+    except ClientError as e:
+        print(f"[RDS VPC] Error obteniendo VPC para {db_subnet_group_name}: {str(e)}")
         return "N/A"
 
 def extract_rds_data(db, rds_client, account_name, account_id, region):
     endpoint = db.get("Endpoint", {})
     subnet_group = db.get("DBSubnetGroup", {})
     subnet_group_name = subnet_group.get("DBSubnetGroupName") if subnet_group else None
+    instance_id = db["DBInstanceIdentifier"]
+    
+    print(f"[RDS] Procesando instancia: {instance_id}")
+    print(f"[RDS] Subnet group encontrado: {subnet_group_name}")
+    
+    vpc_id = get_vpc_info(rds_client, subnet_group_name)
     
     return {
         "AccountName": account_name,
         "AccountID": account_id,
-        "DbInstanceId": db["DBInstanceIdentifier"],
+        "DbInstanceId": instance_id,
         "DbName": db.get("DBName", "N/A"),
         "EngineType": db["Engine"],
         "EngineVersion": db.get("EngineVersion", "N/A"),
@@ -89,7 +100,7 @@ def extract_rds_data(db, rds_client, account_name, account_id, region):
         "Region": region,
         "Endpoint": endpoint.get("Address", "N/A"),
         "Port": endpoint.get("Port", "N/A"),
-        "VPC": get_vpc_info(rds_client, subnet_group_name),
+        "VPC": vpc_id,
         "HasReplica": bool(db.get("ReadReplicaDBInstanceIdentifiers"))
     }
 
@@ -111,6 +122,8 @@ def get_rds_instances(region, credentials, account_id, account_name):
         return []
 
 def insert_or_update_rds_data(rds_data):
+    print(f"[RDS DB] Iniciando inserción de {len(rds_data) if rds_data else 0} instancias RDS")
+    
     if not rds_data:
         return {"processed": 0, "inserted": 0, "updated": 0}
 
@@ -153,6 +166,8 @@ def insert_or_update_rds_data(rds_data):
                 rds["Region"], rds["Endpoint"], rds["Port"],
                 rds["VPC"], rds["HasReplica"]
             )
+            
+            print(f"[RDS DB] Instancia {instance_id} - VPC: {rds['VPC']}")
 
             if (instance_id, rds["AccountID"]) not in existing_data:
                 cursor.execute(query_insert, insert_values)
@@ -165,6 +180,7 @@ def insert_or_update_rds_data(rds_data):
                 updated += 1
 
         conn.commit()
+        print(f"[RDS DB] Completado: {processed} procesadas, {inserted} insertadas, {updated} actualizadas")
         return {
             "processed": processed,
             "inserted": inserted,
