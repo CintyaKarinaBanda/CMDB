@@ -22,31 +22,20 @@ def normalize_list_comparison(old_val, new_val):
         return sorted([str(x).strip() for x in old_list]) == sorted([str(x).strip() for x in new_val])
     return str(old_val) == str(new_val)
 
-def get_instance_changed_by(instance_id, field_name):
-    """Busca el usuario que cambió un campo específico"""
+def get_instance_changed_by(instance_id, update_date):
+    """Busca el usuario que realizó el cambio más cercano a la fecha de actualización"""
     conn = get_db_connection()
     if not conn:
         return "unknown"
     
     try:
         with conn.cursor() as cursor:
-            possible_events = FIELD_EVENT_MAP.get(field_name, [])
-            
-            if possible_events:
-                placeholders = ','.join(['%s'] * len(possible_events))
-                query = f"""
-                    SELECT user_name FROM cloudtrail_events
-                    WHERE resource_name = %s AND resource_type = 'EC2'
-                    AND event_name IN ({placeholders})
-                    ORDER BY event_time DESC LIMIT 1
-                """
-                cursor.execute(query, (instance_id, *possible_events))
-            else:
-                cursor.execute("""
-                    SELECT user_name FROM cloudtrail_events
-                    WHERE resource_name = %s AND resource_type = 'EC2'
-                    ORDER BY event_time DESC LIMIT 1
-                """, (instance_id,))
+            cursor.execute("""
+                SELECT user_name FROM cloudtrail_events
+                WHERE resource_type = 'EC2' AND resource_name = %s 
+                AND ABS(EXTRACT(EPOCH FROM (event_time - %s))) < 86400
+                ORDER BY ABS(EXTRACT(EPOCH FROM (event_time - %s))) ASC LIMIT 1
+            """, (instance_id, update_date, update_date))
             
             if result := cursor.fetchone():
                 return result[0]
@@ -150,18 +139,12 @@ def get_ec2_instances(region, credentials, account_id, account_name):
         return []
 
 def insert_or_update_ec2_data(ec2_data):
-    print(f"💾 DEBUG EC2: Iniciando inserción de {len(ec2_data) if ec2_data else 0} elementos")
-    
     if not ec2_data:
-        print("⚠️ DEBUG EC2: No hay datos para insertar")
         return {"processed": 0, "inserted": 0, "updated": 0}
 
     conn = get_db_connection()
     if not conn:
-        print("❌ DEBUG EC2: Error de conexión a la base de datos")
         return {"error": "DB connection failed", "processed": 0, "inserted": 0, "updated": 0}
-    
-    print("✅ DEBUG EC2: Conexión a BD exitosa")
 
     insert_sql = """
         INSERT INTO ec2 (
@@ -179,9 +162,6 @@ def insert_or_update_ec2_data(ec2_data):
 
     try:
         cursor = conn.cursor()
-        print("🔍 DEBUG EC2: Consultando datos existentes...")
-
-        # Cargar datos existentes: {instanceid: row_dict}
         cursor.execute("SELECT * FROM ec2")
         cols = [col[0].lower() for col in cursor.description]
         existing_rows = cursor.fetchall()
@@ -189,7 +169,6 @@ def insert_or_update_ec2_data(ec2_data):
             row[cols.index("instanceid")]: dict(zip(cols, row))
             for row in existing_rows
         }
-        print(f"📊 DEBUG EC2: {len(existing)} registros existentes en BD")
 
         for ec2 in ec2_data:
             processed += 1
@@ -204,28 +183,62 @@ def insert_or_update_ec2_data(ec2_data):
 
             db_row = existing.get(iid)
 
-            # Si no existe o cambió AccountID/AccountName ➝ INSERT
-            if not db_row or \
-               db_row.get("accountid") != ec2["AccountID"] or \
-               db_row.get("accountname") != ec2["AccountName"]:
+            if not db_row or db_row.get("accountid") != ec2["AccountID"] or db_row.get("accountname") != ec2["AccountName"]:
                 cursor.execute(insert_sql, insert_vals)
                 inserted += 1
-                continue
-
-            # Siempre actualizar last_updated para registros existentes
-            cursor.execute("""
-                UPDATE ec2 SET last_updated = NOW() WHERE instanceid = %s
-            """, (iid,))
-            updated += 1
+            else:
+                updates = []
+                values = []
+                
+                campos = {
+                    "accountname": ec2["AccountName"],
+                    "instancename": ec2["InstanceName"],
+                    "instancetype": ec2["InstanceType"],
+                    "state": ec2["State"],
+                    "region": ec2["Region"],
+                    "availabilityzone": ec2["AvailabilityZone"],
+                    "vpc": ec2["VPC"],
+                    "subnet": ec2["Subnet"],
+                    "osimageid": ec2["OSImageID"],
+                    "osdetails": ec2["OSDetails"],
+                    "iamrole": ec2["IAMRole"],
+                    "securitygroups": ec2["SecurityGroups"],
+                    "keyname": ec2["KeyName"],
+                    "publicip": ec2["PublicIP"],
+                    "privateip": ec2["PrivateIP"],
+                    "storagevolumes": ec2["StorageVolumes"]
+                }
+                
+                for col, new_val in campos.items():
+                    old_val = db_row.get(col)
+                    
+                    # Comparación especial para listas
+                    if col in ['securitygroups', 'storagevolumes']:
+                        if not normalize_list_comparison(old_val, new_val):
+                            updates.append(f"{col} = %s")
+                            values.append(new_val)
+                            changed_by = get_instance_changed_by(iid, datetime.now())
+                            log_change('EC2', iid, col, old_val, new_val, changed_by, ec2["AccountID"], ec2["Region"])
+                    else:
+                        if str(old_val) != str(new_val):
+                            updates.append(f"{col} = %s")
+                            values.append(new_val)
+                            changed_by = get_instance_changed_by(iid, datetime.now())
+                            log_change('EC2', iid, col, old_val, new_val, changed_by, ec2["AccountID"], ec2["Region"])
+                
+                updates.append("last_updated = NOW()")
+                
+                if updates:
+                    update_query = f"UPDATE ec2 SET {', '.join(updates)} WHERE instanceid = %s"
+                    values.append(iid)
+                    cursor.execute(update_query, tuple(values))
+                    updated += 1
 
         conn.commit()
-        print(f"✅ DEBUG EC2: Transacción completada - {inserted} insertados, {updated} actualizados")
         return {"processed": processed, "inserted": inserted, "updated": updated}
 
     except Exception as e:
         conn.rollback()
-        print(f"❌ DEBUG EC2: Error en transacción: {str(e)}")
         return {"error": str(e), "processed": 0, "inserted": 0, "updated": 0}
     finally:
         conn.close()
-        print("🔒 DEBUG EC2: Conexión cerrada")

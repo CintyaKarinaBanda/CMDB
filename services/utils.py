@@ -156,4 +156,16 @@ def _is_significant_change(field_name, old_value, new_value):
         except:
             pass
     
+    # Ignorar cambios de formato de timestamp/fecha equivalentes
+    if field_name.lower() in ['domain', 'created_date', 'creation_time', 'last_modified', 'createdon']:
+        try:
+            from dateutil import parser
+            old_dt = parser.parse(old_str)
+            new_dt = parser.parse(new_str)
+            # Comparar timestamps ignorando zona horaria y microsegundos
+            if abs((old_dt.replace(tzinfo=None, microsecond=0) - new_dt.replace(tzinfo=None, microsecond=0)).total_seconds()) < 1:
+                return False
+        except:
+            pass
+    
     return True

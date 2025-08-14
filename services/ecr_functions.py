@@ -20,20 +20,26 @@ def normalize_list_comparison(old_val, new_val):
         return sorted([str(x).strip() for x in old_list]) == sorted([str(x).strip() for x in new_val])
     return str(old_val) == str(new_val)
 
-def get_repository_changed_by(repository_name, field_name):
+def get_repository_changed_by(repository_name, update_date):
+    """Busca el usuario que realizó el cambio más cercano a la fecha de actualización"""
     conn = get_db_connection()
     if not conn:
         return "unknown"
+    
     try:
         with conn.cursor() as cursor:
-            events = FIELD_EVENT_MAP.get(field_name, [])
-            if events:
-                placeholders = ','.join(['%s'] * len(events))
-                cursor.execute(f"SELECT user_name FROM cloudtrail_events WHERE resource_name = %s AND resource_type = 'ECR' AND event_name IN ({placeholders}) ORDER BY event_time DESC LIMIT 1", (repository_name, *events))
-            else:
-                cursor.execute("SELECT user_name FROM cloudtrail_events WHERE resource_name = %s AND resource_type = 'ECR' ORDER BY event_time DESC LIMIT 1", (repository_name,))
-            return cursor.fetchone()[0] if cursor.fetchone() else "unknown"
-    except:
+            cursor.execute("""
+                SELECT user_name FROM cloudtrail_events
+                WHERE resource_type = 'ECR' AND resource_name = %s 
+                AND ABS(EXTRACT(EPOCH FROM (event_time - %s))) < 86400
+                ORDER BY ABS(EXTRACT(EPOCH FROM (event_time - %s))) ASC LIMIT 1
+            """, (repository_name, update_date, update_date))
+            
+            if result := cursor.fetchone():
+                return result[0]
+            return "unknown"
+    except Exception as e:
+        pass
         return "unknown"
     finally:
         conn.close()
@@ -131,7 +137,8 @@ def insert_or_update_ecr_data(ecr_data):
                     if not normalize_list_comparison(old_val, new_val):
                         updates.append(f"{col} = %s")
                         vals.append(new_val)
-                        log_change('ECR', repo_name, col, old_val, new_val, get_repository_changed_by(repo_name, col), ecr["AccountID"], 'N/A')
+                        changed_by = get_repository_changed_by(repo_name, datetime.now())
+                        log_change('ECR', repo_name, col, old_val, new_val, changed_by, ecr["AccountID"], "us-east-1")
                 
                 if updates:
                     cursor.execute(f"UPDATE ecr SET {', '.join(updates)}, last_updated = NOW() WHERE repositoryname = %s", vals + [repo_name])

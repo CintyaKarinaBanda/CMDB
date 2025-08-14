@@ -2,19 +2,26 @@ from botocore.exceptions import ClientError
 from datetime import datetime
 from services.utils import create_aws_client, get_db_connection, log_change
 
-def get_codebuild_changed_by(project_name, field_name):
+def get_codebuild_changed_by(project_name, update_date):
+    """Busca el usuario que realizó el cambio más cercano a la fecha de actualización"""
     conn = get_db_connection()
-    if not conn: return "unknown"
+    if not conn:
+        return "unknown"
+    
     try:
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT user_name FROM cloudtrail_events 
-            WHERE resource_name = %s AND resource_type = 'codebuild' 
-            ORDER BY event_time DESC LIMIT 1
-        """, (project_name,))
-        result = cursor.fetchone()
-        return result[0] if result else "unknown"
-    except:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT user_name FROM cloudtrail_events
+                WHERE resource_type = 'CODEBUILD' AND resource_name = %s 
+                AND ABS(EXTRACT(EPOCH FROM (event_time - %s))) < 86400
+                ORDER BY ABS(EXTRACT(EPOCH FROM (event_time - %s))) ASC LIMIT 1
+            """, (project_name, update_date, update_date))
+            
+            if result := cursor.fetchone():
+                return result[0]
+            return "unknown"
+    except Exception as e:
+        pass
         return "unknown"
     finally:
         conn.close()
@@ -95,7 +102,6 @@ def insert_or_update_codebuild_data(codebuild_data):
                 ins += 1
             else:
                 old_data = existing[key]
-                changed_by = get_codebuild_changed_by(pn, "project")
                 
                 # Comparar y registrar cambios
                 fields_map = {
@@ -109,8 +115,9 @@ def insert_or_update_codebuild_data(codebuild_data):
                 for field, new_val in fields_map.items():
                     old_val = old_data.get(field)
                     if str(old_val) != str(new_val):
-                        log_change('codebuild', pn, field, old_val, new_val, changed_by, 
-                                 project["AccountID"], None)
+                        changed_by = get_codebuild_changed_by(pn, datetime.now())
+                        log_change('CODEBUILD', pn, field, old_val, new_val, changed_by, 
+                                 project["AccountID"], "us-east-1")
                 
                 cur.execute("""
                     UPDATE codebuild SET source_provider=%s, repository=%s, last_build_status=%s,
