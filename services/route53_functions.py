@@ -2,19 +2,26 @@ from botocore.exceptions import ClientError
 from datetime import datetime
 from services.utils import create_aws_client, get_db_connection, log_change
 
-def get_route53_changed_by(record_id, field_name):
+def get_route53_changed_by(record_id, update_date):
+    """Busca el usuario que realizó el cambio más cercano a la fecha de actualización"""
     conn = get_db_connection()
-    if not conn: return "unknown"
+    if not conn:
+        return "unknown"
+    
     try:
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT user_name FROM cloudtrail_events 
-            WHERE resource_name = %s AND resource_type = 'route53' 
-            ORDER BY event_time DESC LIMIT 1
-        """, (record_id,))
-        result = cursor.fetchone()
-        return result[0] if result else "unknown"
-    except:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT user_name FROM cloudtrail_events
+                WHERE resource_type = 'ROUTE53' AND resource_name = %s 
+                AND ABS(EXTRACT(EPOCH FROM (event_time - %s))) < 86400
+                ORDER BY ABS(EXTRACT(EPOCH FROM (event_time - %s))) ASC LIMIT 1
+            """, (record_id, update_date, update_date))
+            
+            if result := cursor.fetchone():
+                return result[0]
+            return "unknown"
+    except Exception as e:
+        pass
         return "unknown"
     finally:
         conn.close()
@@ -107,8 +114,6 @@ def insert_or_update_route53_data(route53_data):
                 ins += 1
             else:
                 old_data = existing[key]
-                changed_by = get_route53_changed_by(rec_id, "record")
-                
                 # Comparar y registrar cambios
                 fields_map = {
                     "domain_name": record["DomainName"],
@@ -121,8 +126,9 @@ def insert_or_update_route53_data(route53_data):
                 for field, new_val in fields_map.items():
                     old_val = old_data.get(field)
                     if str(old_val) != str(new_val):
-                        log_change('route53', rec_id, field, old_val, new_val, changed_by, 
-                                 record["AccountID"], region)
+                        changed_by = get_route53_changed_by(rec_id, datetime.now())
+                        log_change('ROUTE53', rec_id, field, old_val, new_val, changed_by, 
+                                 record["AccountID"], "us-east-1")
                 
                 cur.execute("""
                     UPDATE route53 SET domain_name=%s, record_type=%s, record_value=%s, 

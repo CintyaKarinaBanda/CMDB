@@ -136,7 +136,7 @@ def _is_significant_change(field_name, old_value, new_value):
         except:
             pass
     
-    # Ignorar cambios de orden en arrays
+    # Ignorar cambios de orden en arrays JSON
     if old_str.startswith('[') and new_str.startswith('['):
         try:
             import json
@@ -145,6 +145,55 @@ def _is_significant_change(field_name, old_value, new_value):
             if isinstance(old_data, list) and isinstance(new_data, list):
                 if set(str(x) for x in old_data) == set(str(x) for x in new_data):
                     return False
+        except:
+            pass
+    
+    # Ignorar cambios de orden en listas Python (para VPC, Subnets, etc.)
+    if field_name.lower() in ['subnets', 'security_groups', 'network_acls', 'internet_gateways', 
+                              'vpc_endpoints', 'vpc_peerings', 'route_rules', 'availability_zones',
+                              'securitygroups', 'storagevolumes', 'vpceendpoints', 'routetables', 'tags']:
+        try:
+            # Convertir ambos valores a listas normalizadas
+            def normalize_to_list(value):
+                if isinstance(value, list):
+                    return value
+                elif isinstance(value, str):
+                    if value.startswith('[') and value.endswith(']'):
+                        try:
+                            import json
+                            return json.loads(value)
+                        except:
+                            return value.split(',') if value else []
+                    else:
+                        return value.split(',') if value else []
+                else:
+                    return [str(value)] if value else []
+            
+            old_list = normalize_to_list(old_value)
+            new_list = normalize_to_list(new_value)
+            
+            # Normalizar elementos de la lista
+            def normalize_element(elem):
+                if isinstance(elem, dict):
+                    # Para diccionarios, convertir a JSON normalizado
+                    import json
+                    return json.dumps(elem, sort_keys=True)
+                elif isinstance(elem, str) and elem.strip().startswith('{'):
+                    # Para strings JSON, parsear y normalizar
+                    try:
+                        import json
+                        parsed = json.loads(elem)
+                        return json.dumps(parsed, sort_keys=True)
+                    except:
+                        return elem.strip()
+                else:
+                    return str(elem).strip()
+            
+            old_normalized = sorted([normalize_element(x) for x in old_list if str(x).strip()])
+            new_normalized = sorted([normalize_element(x) for x in new_list if str(x).strip()])
+            
+            if old_normalized == new_normalized:
+                return False
         except:
             pass
     

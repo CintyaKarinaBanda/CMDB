@@ -24,26 +24,26 @@ def normalize_list_comparison(old_val, new_val):
         return sorted(map(str, old_list)) == sorted(map(str, new_val))
     return str(old_val) == str(new_val)
 
-def get_function_changed_by(function_name, field_name):
+def get_function_changed_by(function_name, update_date):
+    """Busca el usuario que realizó el cambio más cercano a la fecha de actualización"""
     conn = get_db_connection()
     if not conn:
         return "unknown"
+    
     try:
         with conn.cursor() as cursor:
-            events = FIELD_EVENT_MAP.get(field_name, [])
-            placeholders = ','.join(['%s'] * len(events))
-            # amazonq-ignore-next-line
-            sql = f"""
-                SELECT user_name 
-                FROM cloudtrail_events 
-                WHERE resource_name = %s AND resource_type = 'LAMBDA'
-                {"AND event_name IN (" + placeholders + ")" if events else ""}
-                ORDER BY event_time DESC LIMIT 1
-            """
-            cursor.execute(sql, (function_name, *events) if events else (function_name,))
-            row = cursor.fetchone()
-            return row[0] if row else "unknown"
-    except Exception:
+            cursor.execute("""
+                SELECT user_name FROM cloudtrail_events
+                WHERE resource_type = 'LAMBDA' AND resource_name = %s 
+                AND ABS(EXTRACT(EPOCH FROM (event_time - %s))) < 86400
+                ORDER BY ABS(EXTRACT(EPOCH FROM (event_time - %s))) ASC LIMIT 1
+            """, (function_name, update_date, update_date))
+            
+            if result := cursor.fetchone():
+                return result[0]
+            return "unknown"
+    except Exception as e:
+        pass
         return "unknown"
     finally:
         conn.close()
@@ -152,38 +152,67 @@ def insert_or_update_lambda_data(lambda_data):
 
     inserted = updated = processed = 0
     try:
-        with conn.cursor() as cursor:
-            for func in lambda_data:
-                processed += 1
-                # Usar UPSERT de PostgreSQL para manejar duplicados
+        cursor = conn.cursor()
+        
+        # Obtener datos existentes
+        cursor.execute("SELECT * FROM lambda_functions")
+        columns = [desc[0].lower() for desc in cursor.description]
+        existing_data = {row[columns.index("functionname")]: dict(zip(columns, row)) for row in cursor.fetchall()}
+        
+        for func in lambda_data:
+            function_name = func["FunctionName"]
+            processed += 1
+            
+            insert_values = (
+                func["AccountName"], func["AccountID"], func["FunctionName"],
+                func["Description"], func["Handler"], func["Runtime"], func["MemorySize"],
+                func["Timeout"], func["Role"], func["Environment"], func["Triggers"],
+                func["VPCConfig"], func["Region"], func["Tags"]
+            )
+            
+            if function_name not in existing_data:
                 cursor.execute("""
-                    INSERT INTO lambda_functions
-                    (AccountName, AccountID, FunctionName, Description, Handler,
+                    INSERT INTO lambda_functions (AccountName, AccountID, FunctionName, Description, Handler,
                     Runtime, MemorySize, Timeout, Role, Environment, Triggers, VPCConfig, Region, Tags, last_updated)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
-                    ON CONFLICT (FunctionName) DO UPDATE SET
-                        AccountName=EXCLUDED.AccountName,
-                        AccountID=EXCLUDED.AccountID,
-                        Description=EXCLUDED.Description,
-                        Handler=EXCLUDED.Handler,
-                        Runtime=EXCLUDED.Runtime,
-                        MemorySize=EXCLUDED.MemorySize,
-                        Timeout=EXCLUDED.Timeout,
-                        Role=EXCLUDED.Role,
-                        Environment=EXCLUDED.Environment,
-                        Triggers=EXCLUDED.Triggers,
-                        VPCConfig=EXCLUDED.VPCConfig,
-                        Region=EXCLUDED.Region,
-                        Tags=EXCLUDED.Tags,
-                        last_updated=NOW()
-                """, (
-                    func["AccountName"], func["AccountID"], func["FunctionName"],
-                    func["Description"], func["Handler"], func["Runtime"], func["MemorySize"],
-                    func["Timeout"], func["Role"], func["Environment"], func["Triggers"],
-                    func["VPCConfig"], func["Region"], func["Tags"]
-                ))
-                # PostgreSQL no nos dice si fue INSERT o UPDATE, así que contamos como actualizado
-                updated += 1
+                """, insert_values)
+                inserted += 1
+            else:
+                db_row = existing_data[function_name]
+                updates = []
+                values = []
+                
+                campos = {
+                    "accountname": func["AccountName"],
+                    "accountid": func["AccountID"],
+                    "description": func["Description"],
+                    "handler": func["Handler"],
+                    "runtime": func["Runtime"],
+                    "memorysize": func["MemorySize"],
+                    "timeout": func["Timeout"],
+                    "role": func["Role"],
+                    "environment": func["Environment"],
+                    "triggers": func["Triggers"],
+                    "vpcconfig": func["VPCConfig"],
+                    "region": func["Region"],
+                    "tags": func["Tags"]
+                }
+                
+                for col, new_val in campos.items():
+                    old_val = db_row.get(col)
+                    if str(old_val) != str(new_val):
+                        updates.append(f"{col} = %s")
+                        values.append(new_val)
+                        changed_by = get_function_changed_by(function_name, datetime.now())
+                        log_change('LAMBDA', function_name, col, old_val, new_val, changed_by, func["AccountID"], func["Region"])
+                
+                updates.append("last_updated = NOW()")
+                
+                if updates:
+                    update_query = f"UPDATE lambda_functions SET {', '.join(updates)} WHERE functionname = %s"
+                    values.append(function_name)
+                    cursor.execute(update_query, tuple(values))
+                    updated += 1
             conn.commit()
         print(f"[LAMBDA] BD: {inserted} insertados, {updated} actualizados de {processed} procesados")
         return {"processed": processed, "inserted": inserted, "updated": updated}

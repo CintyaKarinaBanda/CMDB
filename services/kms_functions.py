@@ -20,20 +20,26 @@ def normalize_list_comparison(old_val, new_val):
         return sorted([str(x).strip() for x in old_list]) == sorted([str(x).strip() for x in new_val])
     return str(old_val) == str(new_val)
 
-def get_key_changed_by(key_id, field_name):
+def get_key_changed_by(key_id, update_date):
+    """Busca el usuario que realizó el cambio más cercano a la fecha de actualización"""
     conn = get_db_connection()
     if not conn:
         return "unknown"
+    
     try:
         with conn.cursor() as cursor:
-            events = FIELD_EVENT_MAP.get(field_name, [])
-            if events:
-                placeholders = ','.join(['%s'] * len(events))
-                cursor.execute(f"SELECT user_name FROM cloudtrail_events WHERE resource_name = %s AND resource_type = 'KMS' AND event_name IN ({placeholders}) ORDER BY event_time DESC LIMIT 1", (key_id, *events))
-            else:
-                cursor.execute("SELECT user_name FROM cloudtrail_events WHERE resource_name = %s AND resource_type = 'KMS' ORDER BY event_time DESC LIMIT 1", (key_id,))
-            return cursor.fetchone()[0] if cursor.fetchone() else "unknown"
-    except:
+            cursor.execute("""
+                SELECT user_name FROM cloudtrail_events
+                WHERE resource_type = 'KMS' AND resource_name = %s 
+                AND ABS(EXTRACT(EPOCH FROM (event_time - %s))) < 86400
+                ORDER BY ABS(EXTRACT(EPOCH FROM (event_time - %s))) ASC LIMIT 1
+            """, (key_id, update_date, update_date))
+            
+            if result := cursor.fetchone():
+                return result[0]
+            return "unknown"
+    except Exception as e:
+        pass
         return "unknown"
     finally:
         conn.close()
@@ -141,7 +147,8 @@ def insert_or_update_kms_data(kms_data):
                     if not normalize_list_comparison(old_val, new_val):
                         updates.append(f"{col} = %s")
                         vals.append(new_val)
-                        log_change('KMS', key_id, col, old_val, new_val, get_key_changed_by(key_id, col), kms["AccountID"], 'N/A')
+                        changed_by = get_key_changed_by(key_id, datetime.now())
+                        log_change('KMS', key_id, col, old_val, new_val, changed_by, kms["AccountID"], "us-east-1")
                 
                 if updates:
                     cursor.execute(f"UPDATE kms SET {', '.join(updates)}, last_updated = NOW() WHERE keyid = %s", vals + [key_id])

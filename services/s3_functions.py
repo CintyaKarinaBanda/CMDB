@@ -1,21 +1,28 @@
 from botocore.exceptions import ClientError
 from datetime import datetime, timedelta
 import time
-from services.utils import create_aws_client, get_db_connection
+from services.utils import create_aws_client, get_db_connection, log_change
 
-def get_bucket_changed_by(bucket_name, field_name):
+def get_bucket_changed_by(bucket_name, update_date):
+    """Busca el usuario que realizó el cambio más cercano a la fecha de actualización"""
     conn = get_db_connection()
-    if not conn: return "unknown"
+    if not conn:
+        return "unknown"
+    
     try:
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT user_name FROM cloudtrail_events 
-            WHERE resource_name = %s AND resource_type = 'S3' 
-            ORDER BY event_time DESC LIMIT 1
-        """, (bucket_name,))
-        result = cursor.fetchone()
-        return result[0] if result else "unknown"
-    except:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT user_name FROM cloudtrail_events
+                WHERE resource_type = 'S3' AND resource_name = %s 
+                AND ABS(EXTRACT(EPOCH FROM (event_time - %s))) < 86400
+                ORDER BY ABS(EXTRACT(EPOCH FROM (event_time - %s))) ASC LIMIT 1
+            """, (bucket_name, update_date, update_date))
+            
+            if result := cursor.fetchone():
+                return result[0]
+            return "unknown"
+    except Exception as e:
+        pass
         return "unknown"
     finally:
         conn.close()
@@ -153,17 +160,33 @@ def insert_or_update_s3_data(s3_data):
                 ))
                 ins += 1
             else:
-                cur.execute("""
-                    UPDATE s3 SET owner=%s, integrations=%s, network_config=%s,
-                    backup_recovery=%s, encryption=%s, versioning=%s,
-                    capacity=%s, last_updated=NOW()
-                    WHERE bucket_name=%s
-                """, (
-                    b["Owner"], b["Integrations"], b["NetworkConfig"],
-                    b["BackupRecovery"], b["Encryption"], b["Versioning"],
-                    b["Capacity"], bn
-                ))
-                upd += 1
+                old_data = existing[(bn, b["AccountID"])]
+                updates = []
+                vals = []
+                
+                # Comparar y registrar cambios
+                fields_map = {
+                    "owner": b["Owner"],
+                    "integrations": b["Integrations"],
+                    "network_config": b["NetworkConfig"],
+                    "backup_recovery": b["BackupRecovery"],
+                    "encryption": b["Encryption"],
+                    "versioning": b["Versioning"],
+                    "capacity": b["Capacity"]
+                }
+                
+                for field, new_val in fields_map.items():
+                    old_val = old_data.get(field)
+                    if str(old_val) != str(new_val):
+                        updates.append(f"{field} = %s")
+                        vals.append(new_val)
+                        changed_by = get_bucket_changed_by(bn, datetime.now())
+                        log_change('S3', bn, field, old_val, new_val, changed_by, b["AccountID"], b["Region"])
+                
+                if updates:
+                    updates.append("last_updated = NOW()")
+                    cur.execute(f"UPDATE s3 SET {', '.join(updates)} WHERE bucket_name = %s", vals + [bn])
+                    upd += 1
 
         conn.commit()
         return {"processed": len(s3_data), "inserted": ins, "updated": upd}

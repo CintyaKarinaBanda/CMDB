@@ -22,31 +22,20 @@ def normalize_list_comparison(old_val, new_val):
         return sorted([str(x).strip() for x in old_list]) == sorted([str(x).strip() for x in new_val])
     return str(old_val) == str(new_val)
 
-def get_instance_changed_by(instance_id, field_name):
-    """Busca el usuario que cambió un campo específico"""
+def get_instance_changed_by(instance_id, update_date):
+    """Busca el usuario que realizó el cambio más cercano a la fecha de actualización"""
     conn = get_db_connection()
     if not conn:
         return "unknown"
     
     try:
         with conn.cursor() as cursor:
-            possible_events = FIELD_EVENT_MAP.get(field_name, [])
-            
-            if possible_events:
-                placeholders = ','.join(['%s'] * len(possible_events))
-                query = f"""
-                    SELECT user_name FROM cloudtrail_events
-                    WHERE resource_name = %s AND resource_type = 'RDS'
-                    AND event_name IN ({placeholders})
-                    ORDER BY event_time DESC LIMIT 1
-                """
-                cursor.execute(query, (instance_id, *possible_events))
-            else:
-                cursor.execute("""
-                    SELECT user_name FROM cloudtrail_events
-                    WHERE resource_name = %s AND resource_type = 'RDS'
-                    ORDER BY event_time DESC LIMIT 1
-                """, (instance_id,))
+            cursor.execute("""
+                SELECT user_name FROM cloudtrail_events
+                WHERE resource_type = 'RDS' AND resource_name = %s 
+                AND ABS(EXTRACT(EPOCH FROM (event_time - %s))) < 86400
+                ORDER BY ABS(EXTRACT(EPOCH FROM (event_time - %s))) ASC LIMIT 1
+            """, (instance_id, update_date, update_date))
             
             if result := cursor.fetchone():
                 return result[0]
@@ -164,20 +153,40 @@ def insert_or_update_rds_data(rds_data):
                 cursor.execute(query_insert, insert_values)
                 inserted += 1
             else:
-                # Actualizar todos los campos incluyendo VPC
-                cursor.execute("""
-                    UPDATE rds SET 
-                        AccountName = %s, DbName = %s, EngineType = %s, EngineVersion = %s,
-                        StorageSize = %s, InstanceType = %s, Status = %s, Region = %s,
-                        Endpoint = %s, Port = %s, VPC = %s, HasReplica = %s, last_updated = NOW()
-                    WHERE dbinstanceid = %s AND accountid = %s
-                """, (
-                    rds["AccountName"], rds["DbName"], rds["EngineType"], rds["EngineVersion"],
-                    rds["StorageSize"], rds["InstanceType"], rds["Status"], rds["Region"],
-                    rds["Endpoint"], rds["Port"], rds["VPC"], rds["HasReplica"],
-                    instance_id, rds["AccountID"]
-                ))
-                updated += 1
+                db_row = existing_data[(instance_id, rds["AccountID"])]
+                updates = []
+                values = []
+                
+                campos = {
+                    "accountname": rds["AccountName"],
+                    "dbname": rds["DbName"],
+                    "enginetype": rds["EngineType"],
+                    "engineversion": rds["EngineVersion"],
+                    "storagesize": rds["StorageSize"],
+                    "instancetype": rds["InstanceType"],
+                    "status": rds["Status"],
+                    "region": rds["Region"],
+                    "endpoint": rds["Endpoint"],
+                    "port": rds["Port"],
+                    "vpc": rds["VPC"],
+                    "hasreplica": rds["HasReplica"]
+                }
+                
+                for col, new_val in campos.items():
+                    old_val = db_row.get(col)
+                    if str(old_val) != str(new_val):
+                        updates.append(f"{col} = %s")
+                        values.append(new_val)
+                        changed_by = get_instance_changed_by(instance_id, datetime.now())
+                        log_change('RDS', instance_id, col, old_val, new_val, changed_by, rds["AccountID"], rds["Region"])
+                
+                updates.append("last_updated = NOW()")
+                
+                if updates:
+                    update_query = f"UPDATE rds SET {', '.join(updates)} WHERE dbinstanceid = %s AND accountid = %s"
+                    values.extend([instance_id, rds["AccountID"]])
+                    cursor.execute(update_query, tuple(values))
+                    updated += 1
 
         conn.commit()
 

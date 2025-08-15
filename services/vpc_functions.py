@@ -16,31 +16,20 @@ FIELD_EVENT_MAP = {
     "route_rules": ["CreateRouteTable", "DeleteRouteTable"]
 }
 
-def get_vpc_changed_by(vpc_id, field_name):
-    """Busca el usuario que cambió un campo específico"""
+def get_vpc_changed_by(vpc_id, update_date):
+    """Busca el usuario que realizó el cambio más cercano a la fecha de actualización"""
     conn = get_db_connection()
     if not conn:
         return "unknown"
     
     try:
         with conn.cursor() as cursor:
-            possible_events = FIELD_EVENT_MAP.get(field_name, [])
-            
-            if possible_events:
-                placeholders = ','.join(['%s'] * len(possible_events))
-                query = f"""
-                    SELECT user_name FROM cloudtrail_events
-                    WHERE resource_name = %s AND resource_type = 'EC2'
-                    AND event_name IN ({placeholders})
-                    ORDER BY event_time DESC LIMIT 1
-                """
-                cursor.execute(query, (vpc_id, *possible_events))
-            else:
-                cursor.execute("""
-                    SELECT user_name FROM cloudtrail_events
-                    WHERE resource_name = %s AND resource_type = 'EC2'
-                    ORDER BY event_time DESC LIMIT 1
-                """, (vpc_id,))
+            cursor.execute("""
+                SELECT user_name FROM cloudtrail_events
+                WHERE resource_type = 'VPC' AND resource_name = %s 
+                AND ABS(EXTRACT(EPOCH FROM (event_time - %s))) < 86400
+                ORDER BY ABS(EXTRACT(EPOCH FROM (event_time - %s))) ASC LIMIT 1
+            """, (vpc_id, update_date, update_date))
             
             if result := cursor.fetchone():
                 return result[0]
@@ -228,12 +217,12 @@ def insert_or_update_vpc_data(vpc_data):
                         if old_normalized != new_normalized:
                             updates.append(f"{col} = %s")
                             values.append(new_val)
-                            changed_by = get_vpc_changed_by(vpc_id=vpc_id, field_name=col)
+                            changed_by = get_vpc_changed_by(vpc_id, datetime.now())
                             log_change('VPC', vpc_id, col, old_val, new_val, changed_by, vpc["AccountID"], vpc["Region"])
                     elif str(old_val) != str(new_val):
                         updates.append(f"{col} = %s")
                         values.append(new_val)
-                        changed_by = get_vpc_changed_by(vpc_id=vpc_id, field_name=col)
+                        changed_by = get_vpc_changed_by(vpc_id, datetime.now())
                         log_change('VPC', vpc_id, col, old_val, new_val, changed_by, vpc["AccountID"], vpc["Region"])
 
                 updates.append("last_updated = NOW()")
