@@ -154,13 +154,19 @@ def insert_or_update_lambda_data(lambda_data):
     try:
         cursor = conn.cursor()
         
-        # Obtener datos existentes
+        # Obtener datos existentes usando clave compuesta (function_name, account_id, region)
         cursor.execute("SELECT * FROM lambda_functions")
         columns = [desc[0].lower() for desc in cursor.description]
-        existing_data = {row[columns.index("functionname")]: dict(zip(columns, row)) for row in cursor.fetchall()}
+        existing_data = {
+            (row[columns.index("functionname")], row[columns.index("accountid")], row[columns.index("region")]): 
+            dict(zip(columns, row)) for row in cursor.fetchall()
+        }
         
         for func in lambda_data:
             function_name = func["FunctionName"]
+            account_id = func["AccountID"]
+            region = func["Region"]
+            composite_key = (function_name, account_id, region)
             processed += 1
             
             insert_values = (
@@ -170,7 +176,7 @@ def insert_or_update_lambda_data(lambda_data):
                 func["VPCConfig"], func["Region"], func["Tags"]
             )
             
-            if function_name not in existing_data:
+            if composite_key not in existing_data:
                 cursor.execute("""
                     INSERT INTO lambda_functions (AccountName, AccountID, FunctionName, Description, Handler,
                     Runtime, MemorySize, Timeout, Role, Environment, Triggers, VPCConfig, Region, Tags, last_updated)
@@ -178,7 +184,7 @@ def insert_or_update_lambda_data(lambda_data):
                 """, insert_values)
                 inserted += 1
             else:
-                db_row = existing_data[function_name]
+                db_row = existing_data[composite_key]
                 updates = []
                 values = []
                 
@@ -209,8 +215,8 @@ def insert_or_update_lambda_data(lambda_data):
                 updates.append("last_updated = NOW()")
                 
                 if updates:
-                    update_query = f"UPDATE lambda_functions SET {', '.join(updates)} WHERE functionname = %s"
-                    values.append(function_name)
+                    update_query = f"UPDATE lambda_functions SET {', '.join(updates)} WHERE functionname = %s AND accountid = %s AND region = %s"
+                    values.extend([function_name, account_id, region])
                     cursor.execute(update_query, tuple(values))
                     updated += 1
             conn.commit()

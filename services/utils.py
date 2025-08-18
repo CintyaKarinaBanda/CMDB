@@ -74,9 +74,38 @@ def execute_db_query(query, params=None, fetch=False, many=False):
     finally:
         conn.close()
 
-def get_resource_changed_by(resource_id, resource_type, update_date):
+def get_resource_changed_by(resource_id, resource_type, update_date, field_name=None):
     """Busca el usuario que realizó el cambio más cercano a la fecha de actualización."""
     try:
+        # Mapeo de campos a eventos relacionados por tipo de recurso
+        field_event_maps = {
+            'EC2': {
+                'instancename': ['CreateTags', 'DeleteTags'],
+                'instancetype': ['ModifyInstanceAttribute'],
+                'state': ['StartInstances', 'StopInstances', 'RebootInstances', 'TerminateInstances'],
+                'iamrole': ['AssociateIamInstanceProfile', 'DisassociateIamInstanceProfile', 'TerminateInstances'],
+                'securitygroups': ['ModifyInstanceAttribute', 'AuthorizeSecurityGroupIngress', 'StartInstances', 'StopInstances', 'TerminateInstances'],
+                'publicip': ['AssociateAddress', 'DisassociateAddress', 'StartInstances', 'StopInstances', 'TerminateInstances'],
+                'privateip': ['ModifyInstanceAttribute', 'StartInstances', 'StopInstances', 'TerminateInstances'],
+                'vpc': ['ModifyInstanceAttribute', 'StartInstances', 'StopInstances', 'TerminateInstances'],
+                'subnet': ['ModifyInstanceAttribute', 'StartInstances', 'StopInstances', 'TerminateInstances'],
+                'storagevolumes': ['AttachVolume', 'DetachVolume']
+            },
+            'VPC': {
+                'vpc_name': ['CreateTags', 'DeleteTags'],
+                'state': ['CreateVpc', 'DeleteVpc'],
+                'subnets': ['CreateSubnet', 'DeleteSubnet'],
+                'security_groups': ['CreateSecurityGroup', 'DeleteSecurityGroup'],
+                'network_acls': ['CreateNetworkAcl', 'DeleteNetworkAcl'],
+                'internet_gateways': ['CreateInternetGateway', 'AttachInternetGateway', 'DetachInternetGateway'],
+                'vpn_connections': ['CreateVpnConnection', 'DeleteVpnConnection'],
+                'vpc_endpoints': ['CreateVpcEndpoint', 'DeleteVpcEndpoint'],
+                'vpc_peerings': ['CreateVpcPeeringConnection', 'DeleteVpcPeeringConnection'],
+                'route_rules': ['CreateRouteTable', 'DeleteRouteTable']
+            }
+        }
+        
+        # Buscar primero por evento directo
         results = execute_db_query("""
             SELECT user_name FROM cloudtrail_events
             WHERE resource_type = %s AND resource_name = %s 
@@ -84,7 +113,25 @@ def get_resource_changed_by(resource_id, resource_type, update_date):
             ORDER BY ABS(EXTRACT(EPOCH FROM (event_time - %s))) ASC LIMIT 1
         """, (resource_type, resource_id, update_date, update_date), fetch=True)
         
-        return results[0][0] if results and results[0] else "unknown"
+        if results and results[0]:
+            return results[0][0]
+        
+        # Si no encuentra evento directo y hay field_name, buscar por eventos relacionados
+        if field_name and resource_type in field_event_maps:
+            field_events = field_event_maps[resource_type].get(field_name.lower(), [])
+            if field_events:
+                event_list = "', '".join(field_events)
+                results = execute_db_query(f"""
+                    SELECT user_name FROM cloudtrail_events
+                    WHERE resource_name = %s AND event_name IN ('{event_list}')
+                    AND ABS(EXTRACT(EPOCH FROM (event_time - %s))) < 86400
+                    ORDER BY ABS(EXTRACT(EPOCH FROM (event_time - %s))) ASC LIMIT 1
+                """, (resource_id, update_date, update_date), fetch=True)
+                
+                if results and results[0]:
+                    return results[0][0]
+        
+        return "unknown"
     except Exception as e:
         print(f"[ERROR] Buscar changed_by para {resource_type} {resource_id}: {str(e)}")
         return "unknown"
@@ -92,9 +139,34 @@ def get_resource_changed_by(resource_id, resource_type, update_date):
 def log_change(service_type, resource_id, field_name, old_value, new_value, changed_by, account_id=None, region=None):
     """Registra un cambio en la tabla unificada de historial."""
     try:
+        # Ignorar cambios en Lambdas del sistema AWS
+        if service_type == 'Lambda':
+            system_lambdas = {
+                'aws-controltower-NotificationForwarder',
+                'aws-controltower-ConfigComplianceCheck',
+                'aws-controltower-BaselineCloudTrail',
+                'nops-register-aws-account',
+                'generate-external-id',
+                'CidInitialSetup-DoNotRun',
+                'CidCustomResourceDashboard',
+                'CidCustomResourceFunctionInit-DoNotRun',
+                'CidCustomResourceProcessPath-DoNotRun',
+                'cid-CID-Analytics',
+                'cid-CID-Analytics-DataExports',
+                'AWS-Cost-Reporting-Lambda'
+            }
+            # Extraer nombre de función del resource_id si es ARN
+            function_name = resource_id.split(':')[-1] if ':' in resource_id else resource_id
+            if function_name in system_lambdas:
+                return False
+        
         # Filtrar cambios irrelevantes
         if not _is_significant_change(field_name, old_value, new_value):
             return False
+        
+        # Si changed_by es "unknown", intentar buscar con el field_name
+        if changed_by == "unknown":
+            changed_by = get_resource_changed_by(resource_id, service_type, datetime.now(), field_name)
             
         execute_db_query("""
             INSERT INTO changes_history 
@@ -115,12 +187,48 @@ def _is_significant_change(field_name, old_value, new_value):
     if old_str == new_str:
         return False
     
+    # Ignorar cambios entre [] y {} (listas vacías vs diccionarios vacíos)
+    if (old_str in ['[]', '{}'] and new_str in ['[]', '{}']) or (old_str == '' and new_str in ['[]', '{}']) or (new_str == '' and old_str in ['[]', '{}']):
+        return False
+    
+    # Ignorar cambios entre formatos de booleanos (false vs False, true vs True)
+    if (old_str.lower() in ['false', 'true'] and new_str.lower() in ['false', 'true']) and old_str.lower() == new_str.lower():
+        return False
+    
     # Ignorar campos de metadatos internos
     ignore_fields = {
         'last_updated', 'created_at', 'modified_at', 'updated_at',
         'map-migrated', 'migration-id', 'aws-migration-project-id',
-        'requestid', 'eventid', 'principalid', 'sessioncontext'
+        'requestid', 'eventid', 'principalid', 'sessioncontext',
+        'creation_date', 'account', 'accountname', 'accountid', 'region'
     }
+    
+    # Ignorar cambios en tags automáticos de CloudFormation
+    if field_name.lower() == 'tags' and old_str.startswith('{') and new_str.startswith('{'):
+        try:
+            import json
+            import ast
+            # Parsear ambos diccionarios
+            try:
+                old_tags = json.loads(old_str)
+            except:
+                old_tags = ast.literal_eval(old_str)
+            
+            try:
+                new_tags = json.loads(new_str)
+            except:
+                new_tags = ast.literal_eval(new_str)
+            
+            # Filtrar tags de CloudFormation automáticos
+            cf_keys = {'aws:cloudformation:logical-id', 'aws:cloudformation:stack-id', 'aws:cloudformation:stack-name'}
+            old_filtered = {k: v for k, v in old_tags.items() if k not in cf_keys}
+            new_filtered = {k: v for k, v in new_tags.items() if k not in cf_keys}
+            
+            # Si solo cambiaron los tags de CloudFormation, ignorar
+            if old_filtered == new_filtered:
+                return False
+        except:
+            pass
     
     if field_name.lower() in ignore_fields:
         return False
@@ -129,8 +237,20 @@ def _is_significant_change(field_name, old_value, new_value):
     if old_str.startswith('{') and new_str.startswith('{'):
         try:
             import json
-            old_json = json.loads(old_str)
-            new_json = json.loads(new_str)
+            import ast
+            # Intentar parsear como JSON primero
+            try:
+                old_json = json.loads(old_str)
+            except:
+                # Si falla, intentar como dict de Python
+                old_json = ast.literal_eval(old_str)
+            
+            try:
+                new_json = json.loads(new_str)
+            except:
+                # Si falla, intentar como dict de Python
+                new_json = ast.literal_eval(new_str)
+            
             if old_json == new_json:
                 return False
         except:
@@ -164,6 +284,17 @@ def _is_significant_change(field_name, old_value, new_value):
                             return json.loads(value)
                         except:
                             return value.split(',') if value else []
+                    elif value.startswith('{') and value.endswith('}'):
+                        # Manejar sets de strings JSON como en KMS
+                        try:
+                            import json
+                            import ast
+                            parsed_set = ast.literal_eval(value)
+                            if isinstance(parsed_set, set):
+                                return [json.loads(item) if isinstance(item, str) and item.startswith('{') else item for item in parsed_set]
+                        except:
+                            pass
+                        return value.split(',') if value else []
                     else:
                         return value.split(',') if value else []
                 else:
@@ -206,13 +337,26 @@ def _is_significant_change(field_name, old_value, new_value):
             pass
     
     # Ignorar cambios de formato de timestamp/fecha equivalentes
-    if field_name.lower() in ['domain', 'created_date', 'creation_time', 'last_modified', 'createdon']:
+    field_lower = field_name.lower()
+    date_keywords = ['time', 'date', 'created', 'modified', 'updated', 'started', 'ended', 'finished', 'completed', 'executed', 'run', 'launch']
+    
+    if any(keyword in field_lower for keyword in date_keywords):
         try:
             from dateutil import parser
             old_dt = parser.parse(old_str)
             new_dt = parser.parse(new_str)
-            # Comparar timestamps ignorando zona horaria y microsegundos
-            if abs((old_dt.replace(tzinfo=None, microsecond=0) - new_dt.replace(tzinfo=None, microsecond=0)).total_seconds()) < 1:
+            # Convertir ambos a UTC para comparación
+            if old_dt.tzinfo is None:
+                # Si no tiene timezone, asumir UTC
+                old_dt = old_dt.replace(tzinfo=parser.parse('2000-01-01T00:00:00Z').tzinfo)
+            if new_dt.tzinfo is None:
+                new_dt = new_dt.replace(tzinfo=parser.parse('2000-01-01T00:00:00Z').tzinfo)
+            
+            # Convertir a UTC y comparar ignorando microsegundos
+            old_utc = old_dt.astimezone(parser.parse('2000-01-01T00:00:00Z').tzinfo).replace(microsecond=0)
+            new_utc = new_dt.astimezone(parser.parse('2000-01-01T00:00:00Z').tzinfo).replace(microsecond=0)
+            
+            if abs((old_utc - new_utc).total_seconds()) < 1:
                 return False
         except:
             pass
