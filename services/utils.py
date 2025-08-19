@@ -285,15 +285,25 @@ def _is_significant_change(field_name, old_value, new_value):
                         except:
                             return value.split(',') if value else []
                     elif value.startswith('{') and value.endswith('}'):
-                        # Manejar sets de strings JSON como en KMS
+                        # Manejar sets de Python y strings JSON
                         try:
                             import json
                             import ast
                             parsed_set = ast.literal_eval(value)
                             if isinstance(parsed_set, set):
+                                # Convertir set a lista
                                 return [json.loads(item) if isinstance(item, str) and item.startswith('{') else item for item in parsed_set]
+                            elif isinstance(parsed_set, dict):
+                                # Es un diccionario JSON
+                                return [parsed_set]
                         except:
-                            pass
+                            # Si falla el parsing, intentar como JSON
+                            try:
+                                import json
+                                parsed_json = json.loads(value)
+                                return [parsed_json] if isinstance(parsed_json, dict) else parsed_json
+                            except:
+                                pass
                         return value.split(',') if value else []
                     else:
                         return value.split(',') if value else []
@@ -338,23 +348,33 @@ def _is_significant_change(field_name, old_value, new_value):
     
     # Ignorar cambios de formato de timestamp/fecha equivalentes
     field_lower = field_name.lower()
-    date_keywords = ['time', 'date', 'created', 'modified', 'updated', 'started', 'ended', 'finished', 'completed', 'executed', 'run', 'launch']
+    date_keywords = ['time', 'date', 'created', 'modified', 'updated', 'started', 'ended', 'finished', 'completed', 'executed', 'run', 'launch', 'domain']
     
     if any(keyword in field_lower for keyword in date_keywords):
         try:
             from dateutil import parser
+            import pytz
+            
             old_dt = parser.parse(old_str)
             new_dt = parser.parse(new_str)
-            # Convertir ambos a UTC para comparación
-            if old_dt.tzinfo is None:
-                # Si no tiene timezone, asumir UTC
-                old_dt = old_dt.replace(tzinfo=parser.parse('2000-01-01T00:00:00Z').tzinfo)
-            if new_dt.tzinfo is None:
-                new_dt = new_dt.replace(tzinfo=parser.parse('2000-01-01T00:00:00Z').tzinfo)
             
-            # Convertir a UTC y comparar ignorando microsegundos
-            old_utc = old_dt.astimezone(parser.parse('2000-01-01T00:00:00Z').tzinfo).replace(microsecond=0)
-            new_utc = new_dt.astimezone(parser.parse('2000-01-01T00:00:00Z').tzinfo).replace(microsecond=0)
+            # Convertir ambos a UTC para comparación
+            utc = pytz.UTC
+            
+            # Si no tiene timezone, asumir UTC
+            if old_dt.tzinfo is None:
+                old_dt = old_dt.replace(tzinfo=utc)
+            else:
+                old_dt = old_dt.astimezone(utc)
+                
+            if new_dt.tzinfo is None:
+                new_dt = new_dt.replace(tzinfo=utc)
+            else:
+                new_dt = new_dt.astimezone(utc)
+            
+            # Comparar ignorando microsegundos
+            old_utc = old_dt.replace(microsecond=0)
+            new_utc = new_dt.replace(microsecond=0)
             
             if abs((old_utc - new_utc).total_seconds()) < 1:
                 return False
