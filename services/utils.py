@@ -353,7 +353,7 @@ def _is_significant_change(field_name, old_value, new_value):
     
     # Ignorar cambios de formato de timestamp/fecha equivalentes
     field_lower = field_name.lower()
-    date_keywords = ['time', 'date', 'created', 'modified', 'updated', 'started', 'ended', 'finished', 'completed', 'executed', 'run', 'launch', 'domain']
+    date_keywords = ['time', 'date', 'created', 'modified', 'updated', 'started', 'ended', 'finished', 'completed', 'executed', 'run', 'launch', 'domain', 'build']
     
     if any(keyword in field_lower for keyword in date_keywords):
         try:
