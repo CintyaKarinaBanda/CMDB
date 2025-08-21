@@ -277,7 +277,10 @@ def _is_significant_change(field_name, old_value, new_value):
             def normalize_to_list(value):
                 if isinstance(value, list):
                     return value
+                elif isinstance(value, set):
+                    return list(value)
                 elif isinstance(value, str):
+                    value = value.strip()
                     if value.startswith('[') and value.endswith(']'):
                         try:
                             import json
@@ -287,15 +290,16 @@ def _is_significant_change(field_name, old_value, new_value):
                     elif value.startswith('{') and value.endswith('}'):
                         # Manejar sets de Python y strings JSON
                         try:
-                            import json
                             import ast
-                            parsed_set = ast.literal_eval(value)
-                            if isinstance(parsed_set, set):
+                            parsed = ast.literal_eval(value)
+                            if isinstance(parsed, set):
                                 # Convertir set a lista
-                                return [json.loads(item) if isinstance(item, str) and item.startswith('{') else item for item in parsed_set]
-                            elif isinstance(parsed_set, dict):
+                                return list(parsed)
+                            elif isinstance(parsed, dict):
                                 # Es un diccionario JSON
-                                return [parsed_set]
+                                return [parsed]
+                            else:
+                                return [parsed] if parsed else []
                         except:
                             # Si falla el parsing, intentar como JSON
                             try:
@@ -303,8 +307,9 @@ def _is_significant_change(field_name, old_value, new_value):
                                 parsed_json = json.loads(value)
                                 return [parsed_json] if isinstance(parsed_json, dict) else parsed_json
                             except:
-                                pass
-                        return value.split(',') if value else []
+                                # Último recurso: split por comas
+                                inner = value[1:-1].strip()  # Remover { }
+                                return [item.strip() for item in inner.split(',') if item.strip()]
                     else:
                         return value.split(',') if value else []
                 else:
