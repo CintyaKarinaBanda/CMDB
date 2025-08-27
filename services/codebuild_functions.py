@@ -1,30 +1,6 @@
 from botocore.exceptions import ClientError
 from datetime import datetime
-from services.utils import create_aws_client, get_db_connection, log_change
-
-def get_codebuild_changed_by(project_name, update_date):
-    """Busca el usuario que realizó el cambio más cercano a la fecha de actualización"""
-    conn = get_db_connection()
-    if not conn:
-        return "unknown"
-    
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT user_name FROM cloudtrail_events
-                WHERE resource_type = 'CODEBUILD' AND resource_name = %s 
-                AND ABS(EXTRACT(EPOCH FROM (event_time - %s))) < 86400
-                ORDER BY ABS(EXTRACT(EPOCH FROM (event_time - %s))) ASC LIMIT 1
-            """, (project_name, update_date, update_date))
-            
-            if result := cursor.fetchone():
-                return result[0]
-            return "unknown"
-    except Exception as e:
-        pass
-        return "unknown"
-    finally:
-        conn.close()
+from services.utils import create_aws_client, get_db_connection, log_change, get_resource_changed_by
 
 def extract_codebuild_data(project, account_name, account_id, region):
     try:
@@ -34,7 +10,20 @@ def extract_codebuild_data(project, account_name, account_id, region):
         
         # Obtener último build
         last_build = project.get('lastModified')
-        last_modified = last_build.isoformat() if last_build else None
+        if last_build:
+            if hasattr(last_build, 'replace'):
+                # Remover timezone y formatear como string
+                last_modified = last_build.replace(tzinfo=None).strftime('%Y-%m-%d %H:%M:%S.%f')
+            else:
+                # Si es string, parsearlo y normalizar formato
+                try:
+                    from dateutil.parser import parse
+                    parsed_date = parse(str(last_build))
+                    last_modified = parsed_date.replace(tzinfo=None).strftime('%Y-%m-%d %H:%M:%S.%f')
+                except:
+                    last_modified = str(last_build)
+        else:
+            last_modified = None
         
         return {
             "AccountName": account_name,
@@ -115,7 +104,7 @@ def insert_or_update_codebuild_data(codebuild_data):
                 for field, new_val in fields_map.items():
                     old_val = old_data.get(field)
                     if str(old_val) != str(new_val):
-                        changed_by = get_codebuild_changed_by(pn, datetime.now())
+                        changed_by = get_resource_changed_by(pn, 'CODEBUILD', datetime.now(), field)
                         log_change('CODEBUILD', pn, field, old_val, new_val, changed_by, 
                                  project["AccountID"], "us-east-1")
                 

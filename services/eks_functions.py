@@ -1,7 +1,7 @@
 from botocore.exceptions import ClientError
 from datetime import datetime
 import time
-from services.utils import create_aws_client, get_db_connection, log_change
+from services.utils import create_aws_client, get_db_connection, log_change, get_resource_changed_by
 
 def get_local_time():
     return 'NOW()'
@@ -17,34 +17,32 @@ FIELD_EVENT_MAP = {
 
 def normalize_list_comparison(old_val, new_val):
     """Normaliza listas para comparación, ignorando orden"""
-    if isinstance(new_val, list) and isinstance(old_val, (list, str)):
-        old_list = old_val if isinstance(old_val, list) else str(old_val).split(',') if old_val else []
-        return sorted([str(x).strip() for x in old_list]) == sorted([str(x).strip() for x in new_val])
-    return str(old_val) == str(new_val)
-
-def get_cluster_changed_by(cluster_name, update_date):
-    """Busca el usuario que realizó el cambio más cercano a la fecha de actualización"""
-    conn = get_db_connection()
-    if not conn:
-        return "unknown"
+    def normalize_to_list(val):
+        if isinstance(val, list):
+            return val
+        elif isinstance(val, str):
+            val = val.strip()
+            if val in ['[]', '{}', '']:
+                return []
+            elif val.startswith('[') and val.endswith(']'):
+                try:
+                    import json
+                    return json.loads(val)
+                except:
+                    return val[1:-1].split(',') if val != '[]' else []
+            elif val.startswith('{') and val.endswith('}'):
+                return val[1:-1].split(',') if val != '{}' else []
+            else:
+                return val.split(',') if val else []
+        else:
+            return [str(val)] if val else []
     
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT user_name FROM cloudtrail_events
-                WHERE resource_type = 'EKS' AND resource_name = %s 
-                AND ABS(EXTRACT(EPOCH FROM (event_time - %s))) < 86400
-                ORDER BY ABS(EXTRACT(EPOCH FROM (event_time - %s))) ASC LIMIT 1
-            """, (cluster_name, update_date, update_date))
-            
-            if result := cursor.fetchone():
-                return result[0]
-            return "unknown"
-    except Exception as e:
-        pass
-        return "unknown"
-    finally:
-        conn.close()
+    old_list = normalize_to_list(old_val)
+    new_list = normalize_to_list(new_val)
+    
+    return sorted([str(x).strip() for x in old_list if str(x).strip()]) == sorted([str(x).strip() for x in new_list if str(x).strip()])
+
+
 
 def extract_eks_data(cluster, eks_client, account_name, account_id, region):
     try:
@@ -133,7 +131,7 @@ def insert_or_update_eks_data(eks_data):
                     if not normalize_list_comparison(old_val, new_val):
                         updates.append(f"{col} = %s")
                         vals.append(new_val)
-                        changed_by = get_cluster_changed_by(cluster_name, datetime.now())
+                        changed_by = get_resource_changed_by(cluster_name, 'EKS', datetime.now(), col)
                         log_change('EKS', cluster_name, col, old_val, new_val, changed_by, eks["AccountID"], "us-east-1")
                 
                 if updates:

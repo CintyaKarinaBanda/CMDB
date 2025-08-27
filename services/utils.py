@@ -102,6 +102,20 @@ def get_resource_changed_by(resource_id, resource_type, update_date, field_name=
                 'vpc_endpoints': ['CreateVpcEndpoint', 'DeleteVpcEndpoint'],
                 'vpc_peerings': ['CreateVpcPeeringConnection', 'DeleteVpcPeeringConnection'],
                 'route_rules': ['CreateRouteTable', 'DeleteRouteTable']
+            },
+            'CODEBUILD': {
+                'source_provider': ['UpdateProject'],
+                'repository': ['UpdateProject'],
+                'description': ['UpdateProject'],
+                'last_modified': ['StartBuild', 'UpdateProject']
+            },
+            'EKS': {
+                'clustername': ['CreateCluster', 'UpdateClusterConfig'],
+                'status': ['CreateCluster', 'DeleteCluster', 'UpdateClusterConfig'],
+                'kubernetesversion': ['UpdateClusterVersion'],
+                'supportperiod': ['UpdateClusterConfig'],
+                'addons': ['CreateAddon', 'DeleteAddon', 'UpdateAddon'],
+                'tags': ['TagResource', 'UntagResource']
             }
         }
         
@@ -358,30 +372,16 @@ def _is_significant_change(field_name, old_value, new_value):
     if any(keyword in field_lower for keyword in date_keywords):
         try:
             from dateutil import parser
-            import pytz
             
             old_dt = parser.parse(old_str)
             new_dt = parser.parse(new_str)
             
-            # Convertir ambos a UTC para comparación
-            utc = pytz.UTC
+            # Normalizar ambas fechas removiendo timezone para comparación
+            old_normalized = old_dt.replace(tzinfo=None)
+            new_normalized = new_dt.replace(tzinfo=None)
             
-            # Si no tiene timezone, asumir UTC
-            if old_dt.tzinfo is None:
-                old_dt = old_dt.replace(tzinfo=utc)
-            else:
-                old_dt = old_dt.astimezone(utc)
-                
-            if new_dt.tzinfo is None:
-                new_dt = new_dt.replace(tzinfo=utc)
-            else:
-                new_dt = new_dt.astimezone(utc)
-            
-            # Comparar ignorando microsegundos
-            old_utc = old_dt.replace(microsecond=0)
-            new_utc = new_dt.replace(microsecond=0)
-            
-            if abs((old_utc - new_utc).total_seconds()) < 1:
+            # Comparar fechas normalizadas ignorando microsegundos menores
+            if abs((old_normalized - new_normalized).total_seconds()) < 1:
                 return False
         except:
             pass
