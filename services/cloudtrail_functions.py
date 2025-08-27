@@ -235,7 +235,11 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
                 # Solo filtrar por eventos importantes, sin validar recursos
                 if event_name in IMPORTANT_EVENTS and event_source in EVENT_SOURCES:
                     filtered_events += 1
-                    resource_name = extract_resource_name(event_detail)
+                    try:
+                        resource_name = extract_resource_name(event_detail)
+                    except Exception as extract_error:
+                        print(f"DEBUG CloudTrail {region}: extract_resource_name failed: {str(extract_error)}")
+                        resource_name = 'unknown'
                     
                     # Insertar TODOS los eventos importantes, sin filtro de recursos
                     events.append({
@@ -253,7 +257,12 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
                     })
             
             # Verificar si hay más páginas
-            next_token = page.get('NextToken')
+            try:
+                next_token = page.get('NextToken')
+            except Exception as token_error:
+                print(f"DEBUG CloudTrail {region}: NextToken access failed: {str(token_error)}")
+                break
+                
             if not next_token:
                 break
         
@@ -263,7 +272,9 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
         
         return {"events": events}
     except Exception as e:
+        import traceback
         print(f"DEBUG CloudTrail ERROR {region}: {str(e)}")
+        print(f"DEBUG CloudTrail TRACEBACK {region}: {traceback.format_exc()}")
         return {"events": []}
 
 def insert_or_update_cloudtrail_events(events_data):
