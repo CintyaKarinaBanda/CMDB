@@ -55,9 +55,18 @@ SERVICE_FIELDS = {
 RESOURCE_TYPES = {"ec2.amazonaws.com": "EC2", "rds.amazonaws.com": "RDS", "redshift.amazonaws.com": "Redshift", "s3.amazonaws.com": "S3", "eks.amazonaws.com": "EKS", "ecr.amazonaws.com": "ECR", "kms.amazonaws.com": "KMS", "lambda.amazonaws.com": "LAMBDA", "apigateway.amazonaws.com": "API-GATEWAY", "glue.amazonaws.com": "GLUE", "cloudformation.amazonaws.com": "CLOUDFORMATION", "cloudtrail.amazonaws.com": "CLOUDTRAIL", "ssm.amazonaws.com": "SSM", "athena.amazonaws.com": "ATHENA", "states.amazonaws.com": "STEP-FUNCTIONS", "transfer.amazonaws.com": "TRANSFER-FAMILY", "codepipeline.amazonaws.com": "CODEPIPELINE", "elasticmapreduce.amazonaws.com": "EMR"}
 
 def extract_resource_name(event_detail):
+    if not event_detail or not isinstance(event_detail, dict):
+        return "unknown"
+        
     req = event_detail.get("requestParameters", {})
     resp = event_detail.get("responseElements", {})
     event_source = event_detail.get("eventSource", "")
+    
+    # Validar que req y resp sean diccionarios
+    if not isinstance(req, dict):
+        req = {}
+    if not isinstance(resp, dict):
+        resp = {}
     
     # Check resource sets
     for set_name in ["resourcesSet", "instancesSet"]:
