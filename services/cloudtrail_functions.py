@@ -193,12 +193,30 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
             if next_token:
                 params['NextToken'] = next_token
             
-            page = cloudtrail_client.lookup_events(**params)
+            try:
+                page = cloudtrail_client.lookup_events(**params)
+                if not page:
+                    print(f"DEBUG CloudTrail {region}: lookup_events returned None")
+                    break
+            except Exception as lookup_error:
+                print(f"DEBUG CloudTrail {region}: lookup_events failed: {str(lookup_error)}")
+                break
+                
             pages_processed += 1
             
             for event in page.get('Events', []):
                 total_events += 1
-                event_detail = json.loads(event.get('CloudTrailEvent', '{}'))
+                
+                # Validar que el evento tenga CloudTrailEvent
+                cloudtrail_event = event.get('CloudTrailEvent')
+                if not cloudtrail_event:
+                    continue
+                    
+                try:
+                    event_detail = json.loads(cloudtrail_event)
+                except json.JSONDecodeError:
+                    continue
+                    
                 event_name = event_detail.get('eventName', '')
                 event_source = event_detail.get('eventSource', '')
                 
