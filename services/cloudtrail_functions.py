@@ -171,6 +171,7 @@ def extract_changes(event_detail):
 def get_all_cloudtrail_events(region, credentials, account_id, account_name):
     cloudtrail_client = create_aws_client("cloudtrail", region, credentials)
     if not cloudtrail_client:
+        print(f"DEBUG CloudTrail {region}: No client created")
         return {"events": []}
 
     try:
@@ -195,8 +196,11 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
             
             try:
                 page = cloudtrail_client.lookup_events(**params)
-                if not page:
+                if page is None:
                     print(f"DEBUG CloudTrail {region}: lookup_events returned None")
+                    break
+                if not isinstance(page, dict):
+                    print(f"DEBUG CloudTrail {region}: lookup_events returned non-dict: {type(page)}")
                     break
             except Exception as lookup_error:
                 print(f"DEBUG CloudTrail {region}: lookup_events failed: {str(lookup_error)}")
@@ -204,9 +208,17 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
                 
             pages_processed += 1
             
-            for event in page.get('Events', []):
+            events_list = page.get('Events', [])
+            if not isinstance(events_list, list):
+                print(f"DEBUG CloudTrail {region}: Events is not a list: {type(events_list)}")
+                continue
+                
+            for event in events_list:
                 total_events += 1
                 
+                if not isinstance(event, dict):
+                    continue
+                    
                 # Validar que el evento tenga CloudTrailEvent
                 cloudtrail_event = event.get('CloudTrailEvent')
                 if not cloudtrail_event:
