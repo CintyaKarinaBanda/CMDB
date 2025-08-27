@@ -174,7 +174,7 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
         return {"events": []}
 
     try:
-        start_time = datetime.now() - timedelta(days=3)
+        start_time = datetime.now() - timedelta(days=10)
         events = []
         total_events = 0
         filtered_events = 0
