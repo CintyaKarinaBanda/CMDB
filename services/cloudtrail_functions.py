@@ -192,7 +192,7 @@ def get_all_cloudtrail_events(region, credentials, account_id, account_name):
         # Obtener múltiples páginas manualmente
         next_token = None
         pages_processed = 0
-        max_pages = 500  # 20 páginas x 50 eventos = 1000 eventos máximo
+        max_pages = 1000  # 20 páginas x 50 eventos = 1000 eventos máximo
         
         while pages_processed < max_pages:
             params = {
