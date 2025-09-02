@@ -116,6 +116,20 @@ def get_resource_changed_by(resource_id, resource_type, update_date, field_name=
                 'supportperiod': ['UpdateClusterConfig'],
                 'addons': ['CreateAddon', 'DeleteAddon', 'UpdateAddon'],
                 'tags': ['TagResource', 'UntagResource']
+            },
+            'GLUE': {
+                'job_name': ['CreateJob', 'UpdateJob'],
+                'type': ['CreateJob', 'UpdateJob'],
+                'domain': ['CreateJob', 'UpdateJob'],
+                'created_by': ['CreateJob', 'UpdateJob'],
+                'glue_version': ['UpdateJob']
+            },
+            'API-GATEWAY': {
+                'name': ['CreateRestApi', 'UpdateRestApi', 'CreateApi', 'UpdateApi'],
+                'description': ['UpdateRestApi', 'UpdateApi'],
+                'protocol': ['CreateApi', 'UpdateApi'],
+                'endpoint_type': ['UpdateRestApi', 'UpdateApi'],
+                'created_date': ['CreateRestApi', 'CreateApi']
             }
         }
         
@@ -214,7 +228,8 @@ def _is_significant_change(field_name, old_value, new_value):
         'last_updated', 'created_at', 'modified_at', 'updated_at',
         'map-migrated', 'migration-id', 'aws-migration-project-id',
         'requestid', 'eventid', 'principalid', 'sessioncontext',
-        'creation_date', 'account', 'accountname', 'accountid', 'region'
+        'creation_date', 'account', 'accountname', 'accountid', 
+        'region', 'record_value', 'domain', 'created_date'
     }
     
     # Ignorar cambios en tags automáticos de CloudFormation

@@ -1,30 +1,6 @@
 from botocore.exceptions import ClientError
 from datetime import datetime
-from services.utils import create_aws_client, get_db_connection, log_change
-
-def get_api_changed_by(api_id, update_date):
-    """Busca el usuario que realizó el cambio más cercano a la fecha de actualización"""
-    conn = get_db_connection()
-    if not conn:
-        return "unknown"
-    
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT user_name FROM cloudtrail_events
-                WHERE resource_type = 'API-GATEWAY' AND resource_name = %s 
-                AND ABS(EXTRACT(EPOCH FROM (event_time - %s))) < 86400
-                ORDER BY ABS(EXTRACT(EPOCH FROM (event_time - %s))) ASC LIMIT 1
-            """, (api_id, update_date, update_date))
-            
-            if result := cursor.fetchone():
-                return result[0]
-            return "unknown"
-    except Exception as e:
-        pass
-        return "unknown"
-    finally:
-        conn.close()
+from services.utils import create_aws_client, get_db_connection, log_change, get_resource_changed_by
 
 def extract_api_data(api, apigateway_client, account_name, account_id, region):
     """Extrae datos relevantes de una API Gateway"""
@@ -38,6 +14,21 @@ def extract_api_data(api, apigateway_client, account_name, account_id, region):
     endpoint_types = api.get("endpointConfiguration", {}).get("types", ["REGIONAL"])
     endpoint_type = endpoint_types[0] if endpoint_types else "REGIONAL"
     
+    # Manejar fecha de creación
+    created_date = api.get("createdDate")
+    if created_date:
+        if hasattr(created_date, 'strftime'):
+            formatted_date = created_date.strftime('%Y-%m-%d %H:%M:%S.%f')
+        else:
+            try:
+                from dateutil.parser import parse
+                parsed_date = parse(str(created_date))
+                formatted_date = parsed_date.strftime('%Y-%m-%d %H:%M:%S.%f')
+            except:
+                formatted_date = str(created_date)
+    else:
+        formatted_date = None
+    
     return {
         "AccountName": account_name[:255],
         "AccountID": account_id[:20],
@@ -46,13 +37,28 @@ def extract_api_data(api, apigateway_client, account_name, account_id, region):
         "Description": (api.get("description", "N/A") or "N/A"),
         "Protocol": "REST"[:100],
         "EndpointType": endpoint_type[:255],
-        "CreatedDate": api.get("createdDate"),
+        "CreatedDate": formatted_date,
         "Region": region[:50]
     }
 
 def extract_apiv2_data(api, apigatewayv2_client, account_name, account_id, region):
     """Extrae datos relevantes de una API Gateway v2 (HTTP/WebSocket)"""
     tags = api.get("Tags", {})
+    
+    # Manejar fecha de creación
+    created_date = api.get("CreatedDate")
+    if created_date:
+        if hasattr(created_date, 'strftime'):
+            formatted_date = created_date.strftime('%Y-%m-%d %H:%M:%S.%f')
+        else:
+            try:
+                from dateutil.parser import parse
+                parsed_date = parse(str(created_date))
+                formatted_date = parsed_date.strftime('%Y-%m-%d %H:%M:%S.%f')
+            except:
+                formatted_date = str(created_date)
+    else:
+        formatted_date = None
     
     return {
         "AccountName": account_name[:255],
@@ -62,7 +68,7 @@ def extract_apiv2_data(api, apigatewayv2_client, account_name, account_id, regio
         "Description": (api.get("Description", "N/A") or "N/A"),
         "Protocol": (api.get("ProtocolType", "HTTP") or "HTTP")[:100],
         "EndpointType": (api.get("ApiEndpoint", "REGIONAL") or "REGIONAL")[:255],
-        "CreatedDate": api.get("CreatedDate"),
+        "CreatedDate": formatted_date,
         "Region": region[:50]
     }
 
@@ -179,7 +185,7 @@ def insert_or_update_apigateway_data(apigateway_data):
                     if str(old_val) != str(new_val):
                         updates.append(f"{col} = %s")
                         values.append(new_val)
-                        changed_by = get_api_changed_by(api_id, datetime.now())
+                        changed_by = get_resource_changed_by(api_id, 'API-GATEWAY', datetime.now(), col)
                         log_change('API-GATEWAY', api_id, col, old_val, new_val, changed_by, api["AccountID"], api["Region"])
 
                 updates.append("last_updated = CURRENT_TIMESTAMP")

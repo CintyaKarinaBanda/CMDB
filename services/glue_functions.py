@@ -1,30 +1,6 @@
 from botocore.exceptions import ClientError
 from datetime import datetime
-from services.utils import create_aws_client, get_db_connection, log_change
-
-def get_job_changed_by(job_name, update_date):
-    """Busca el usuario que realizó el cambio más cercano a la fecha de actualización"""
-    conn = get_db_connection()
-    if not conn:
-        return "unknown"
-    
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT user_name FROM cloudtrail_events
-                WHERE resource_type = 'GLUE' AND resource_name = %s 
-                AND ABS(EXTRACT(EPOCH FROM (event_time - %s))) < 86400
-                ORDER BY ABS(EXTRACT(EPOCH FROM (event_time - %s))) ASC LIMIT 1
-            """, (job_name, update_date, update_date))
-            
-            if result := cursor.fetchone():
-                return result[0]
-            return "unknown"
-    except Exception as e:
-        pass
-        return "unknown"
-    finally:
-        conn.close()
+from services.utils import create_aws_client, get_db_connection, log_change, get_resource_changed_by
 
 def extract_job_data(job, glue_client, account_name, account_id, region):
     """Extrae datos relevantes de un job de Glue"""
@@ -64,12 +40,27 @@ def extract_job_data(job, glue_client, account_name, account_id, region):
         else:
             created_by = "Visual"  # Asumir Visual por defecto
     
+    # Manejar fecha de creación
+    created_on = job.get("CreatedOn")
+    if created_on:
+        if hasattr(created_on, 'strftime'):
+            domain = created_on.strftime('%Y-%m-%d %H:%M:%S.%f')
+        else:
+            try:
+                from dateutil.parser import parse
+                parsed_date = parse(str(created_on))
+                domain = parsed_date.strftime('%Y-%m-%d %H:%M:%S.%f')
+            except:
+                domain = str(created_on)
+    else:
+        domain = "N/A"
+    
     return {
         "AccountName": account_name[:255],
         "AccountID": account_id[:20],
         "JobName": job["Name"][:255],
         "Type": job_type[:100],
-        "Domain": job.get("CreatedOn"),  # Fecha de creación como dominio
+        "Domain": domain,
         "CreatedBy": created_by[:255],
         "GlueVersion": job.get("GlueVersion", "N/A")[:50],
         "Region": region[:50]
@@ -174,7 +165,7 @@ def insert_or_update_glue_data(glue_data):
                     if str(old_val) != str(new_val):
                         updates.append(f"{col} = %s")
                         values.append(new_val)
-                        changed_by = get_job_changed_by(job_name, datetime.now())
+                        changed_by = get_resource_changed_by(job_name, 'GLUE', datetime.now(), col)
                         log_change('GLUE', job_name, col, old_val, new_val, changed_by, job["AccountID"], job["Region"])
 
                 updates.append("last_updated = CURRENT_TIMESTAMP")

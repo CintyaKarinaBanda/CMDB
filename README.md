@@ -60,6 +60,3 @@ python script.py --services ec2 rds
 - Los resultados y logs se muestran por consola.
 - Puedes modificar los archivos de configuración para adaptarlo a tu entorno.
 
----
-
-Actualizado: 13 de junio de 2025
