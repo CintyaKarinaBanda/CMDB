@@ -18,8 +18,12 @@ pip install -r requirements.txt
 ```
 
 2. Configura los archivos necesarios:
-   - `config.py`: Regiones, credenciales de base de datos, configuración de S3, etc.
-   - `listadoDeRoles.py`: Lista de cuentas y roles AWS a consultar.
+   ```bash
+   cp config.example.py config.py
+   cp listadoDeRoles.example.py listadoDeRoles.py
+   ```
+   - Edita `config.py`: Regiones, credenciales de base de datos, configuración de S3, etc.
+   - Edita `listadoDeRoles.py`: Lista de cuentas y roles AWS a consultar.
 
 3. Asegúrate de que la instancia EC2 (o el usuario) tenga permisos para asumir los roles definidos.
 
