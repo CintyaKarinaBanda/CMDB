@@ -1,30 +1,6 @@
 from botocore.exceptions import ClientError
 from datetime import datetime
-from services.utils import create_aws_client, get_db_connection, log_change
-
-def get_pipeline_changed_by(pipeline_name, update_date):
-    """Busca el usuario que realizó el cambio más cercano a la fecha de actualización"""
-    conn = get_db_connection()
-    if not conn:
-        return "unknown"
-    
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT user_name FROM cloudtrail_events
-                WHERE resource_type = 'CODEPIPELINE' AND resource_name = %s 
-                AND ABS(EXTRACT(EPOCH FROM (event_time - %s))) < 86400
-                ORDER BY ABS(EXTRACT(EPOCH FROM (event_time - %s))) ASC LIMIT 1
-            """, (pipeline_name, update_date, update_date))
-            
-            if result := cursor.fetchone():
-                return result[0]
-            return "unknown"
-    except Exception as e:
-        pass
-        return "unknown"
-    finally:
-        conn.close()
+from services.utils import create_aws_client, get_db_connection, log_change, get_resource_changed_by
 
 def extract_pipeline_data(pipeline, codepipeline_client, account_name, account_id, region):
     """Extrae datos relevantes de un pipeline de CodePipeline"""
@@ -41,7 +17,22 @@ def extract_pipeline_data(pipeline, codepipeline_client, account_name, account_i
         if executions:
             latest_execution = executions[0]
             last_execution_status = latest_execution.get("status", "Unknown")
-            last_execution_started = latest_execution.get("startTime")
+            
+            # Manejar fecha de última ejecución
+            start_time = latest_execution.get("startTime")
+            if start_time:
+                if hasattr(start_time, 'replace'):
+                    # Remover timezone y formatear como string
+                    last_execution_started = start_time.replace(tzinfo=None).strftime('%Y-%m-%d %H:%M:%S.%f')
+                else:
+                    try:
+                        from dateutil.parser import parse
+                        parsed_date = parse(str(start_time))
+                        last_execution_started = parsed_date.replace(tzinfo=None).strftime('%Y-%m-%d %H:%M:%S.%f')
+                    except:
+                        last_execution_started = str(start_time)
+            else:
+                last_execution_started = None
             
             # Obtener revisiones de origen
             source_revisions = latest_execution.get("sourceRevisions", [])
@@ -173,7 +164,7 @@ def insert_or_update_codepipeline_data(codepipeline_data):
                     if str(old_val) != str(new_val):
                         updates.append(f"{col} = %s")
                         values.append(new_val)
-                        changed_by = get_pipeline_changed_by(pipeline_name, datetime.now())
+                        changed_by = get_resource_changed_by(pipeline_name, 'CODEPIPELINE', datetime.now(), col)
                         log_change('CODEPIPELINE', pipeline_name, col, old_val, new_val, changed_by, pipeline["AccountID"], pipeline["Region"])
 
                 updates.append("last_updated = CURRENT_TIMESTAMP")

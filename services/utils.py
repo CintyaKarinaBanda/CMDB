@@ -130,6 +130,12 @@ def get_resource_changed_by(resource_id, resource_type, update_date, field_name=
                 'protocol': ['CreateApi', 'UpdateApi'],
                 'endpoint_type': ['UpdateRestApi', 'UpdateApi'],
                 'created_date': ['CreateRestApi', 'CreateApi']
+            },
+            'CODEPIPELINE': {
+                'pipeline_name': ['CreatePipeline', 'UpdatePipeline'],
+                'last_execution_status': ['StartPipelineExecution', 'StopPipelineExecution'],
+                'latest_source_revisions': ['StartPipelineExecution'],
+                'last_execution_started': ['StartPipelineExecution']
             }
         }
         
@@ -229,7 +235,7 @@ def _is_significant_change(field_name, old_value, new_value):
         'map-migrated', 'migration-id', 'aws-migration-project-id',
         'requestid', 'eventid', 'principalid', 'sessioncontext',
         'creation_date', 'account', 'accountname', 'accountid', 
-        'region', 'record_value', 'domain', 'created_date'
+        'region', 'record_value', 'domain', 'created_date', 'last_execution_started'
     }
     
     # Ignorar cambios en tags automáticos de CloudFormation

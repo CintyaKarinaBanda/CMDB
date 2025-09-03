@@ -12,7 +12,7 @@ def extract_job_data(job, glue_client, account_name, account_id, region):
     except ClientError:
         pass  # Ignorar si no se pueden obtener tags
     
-    get_tag = lambda key: tags.get(key, "N/A")
+
     
     # Determinar el tipo de job basado en el comando
     command_name = job.get('Command', {}).get('Name', '')
@@ -40,27 +40,36 @@ def extract_job_data(job, glue_client, account_name, account_id, region):
         else:
             created_by = "Visual"  # Asumir Visual por defecto
     
-    # Manejar fecha de creación
+    # Manejar fecha de creación con zona horaria UTC
     created_on = job.get("CreatedOn")
     if created_on:
         if hasattr(created_on, 'strftime'):
-            domain = created_on.strftime('%Y-%m-%d %H:%M:%S.%f')
+            # Convertir a UTC si tiene zona horaria
+            if hasattr(created_on, 'utctimetuple'):
+                created_on_formatted = created_on.strftime('%Y-%m-%d %H:%M:%S UTC')
+            else:
+                created_on_formatted = created_on.strftime('%Y-%m-%d %H:%M:%S')
         else:
             try:
                 from dateutil.parser import parse
                 parsed_date = parse(str(created_on))
-                domain = parsed_date.strftime('%Y-%m-%d %H:%M:%S.%f')
-            except:
-                domain = str(created_on)
+                # Convertir a UTC
+                if parsed_date.tzinfo is not None:
+                    parsed_date = parsed_date.utctimetuple()
+                    created_on_formatted = datetime(*parsed_date[:6]).strftime('%Y-%m-%d %H:%M:%S UTC')
+                else:
+                    created_on_formatted = parsed_date.strftime('%Y-%m-%d %H:%M:%S')
+            except (ValueError, ImportError):
+                created_on_formatted = str(created_on)
     else:
-        domain = "N/A"
+        created_on_formatted = "N/A"
     
     return {
         "AccountName": account_name[:255],
         "AccountID": account_id[:20],
         "JobName": job["Name"][:255],
         "Type": job_type[:100],
-        "Domain": domain,
+        "Domain": created_on_formatted,
         "CreatedBy": created_by[:255],
         "GlueVersion": job.get("GlueVersion", "N/A")[:50],
         "Region": region[:50]

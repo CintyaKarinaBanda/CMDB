@@ -24,3 +24,4 @@ from services.codebuild_functions import get_codebuild_projects, insert_or_updat
 from services.sns_functions import get_sns_topics, insert_or_update_sns_data
 
 from services.route53_functions import get_route53_records, insert_or_update_route53_data
+from services.cloudfront_functions import get_cloudfront_distributions, insert_or_update_cloudfront_data

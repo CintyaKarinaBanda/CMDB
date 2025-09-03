@@ -32,7 +32,8 @@ from services import (
     get_emr_clusters, insert_or_update_emr_data,
     get_codebuild_projects, insert_or_update_codebuild_data,
     get_sns_topics, insert_or_update_sns_data,
-    get_route53_records, insert_or_update_route53_data
+    get_route53_records, insert_or_update_route53_data,
+    get_cloudfront_distributions, insert_or_update_cloudfront_data
 )
 
 def assume_role(role_arn):
@@ -74,7 +75,8 @@ def get_service_funcs(region, creds, account_id, account_name):
         "emr": lambda: get_emr_clusters(region, creds, account_id, account_name),
         "codebuild": lambda: get_codebuild_projects(region, creds, account_id, account_name),
         "sns": lambda: get_sns_topics(region, creds, account_id, account_name),
-        "route53": lambda: get_route53_records(region, creds, account_id, account_name)
+        "route53": lambda: get_route53_records(region, creds, account_id, account_name),
+        "cloudfront": lambda: get_cloudfront_distributions(region, creds, account_id, account_name)
     }
 
 def process_account_region(account_id, role_name, account_name, region, services):
@@ -157,7 +159,8 @@ def main(services):
         "emr": insert_or_update_emr_data,
         "codebuild": insert_or_update_codebuild_data,
         "sns": insert_or_update_sns_data,
-        "route53": insert_or_update_route53_data
+        "route53": insert_or_update_route53_data,
+        "cloudfront": insert_or_update_cloudfront_data
     }
 
     for s in services:
