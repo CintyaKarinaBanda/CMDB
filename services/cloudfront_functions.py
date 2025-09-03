@@ -45,10 +45,11 @@ def get_origin_details(origins):
     
     origin_list = []
     for origin in origins:
+        domain_name = origin.get("DomainName", "")
         origin_info = {
             "id": origin.get("Id", ""),
-            "domain": origin.get("DomainName", ""),
-            "type": "S3" if ".s3." in origin.get("DomainName", "") else "Custom"
+            "domain": domain_name,
+            "type": "S3" if (".s3." in domain_name or ".s3-" in domain_name or domain_name.endswith(".s3.amazonaws.com")) else "Custom"
         }
         origin_list.append(origin_info)
     return origin_list
@@ -193,11 +194,45 @@ def insert_or_update_cloudfront_data(cloudfront_data):
                 for col, new_val in campos.items():
                     old_val = db_row.get(col)
                     
-                    if str(old_val) != str(new_val):
-                        updates.append(f"{col} = %s")
-                        values.append(new_val)
-                        changed_by = get_distribution_changed_by(dist_id, datetime.now())
-                        log_change('CloudFront', dist_id, col, old_val, new_val, changed_by, cf["AccountID"], cf["Region"])
+                    # Manejo especial para origins (lista de objetos)
+                    if col == 'origins':
+                        import json
+                        try:
+                            old_origins = json.loads(str(old_val)) if old_val and old_val != 'N/A' else []
+                            new_origins = new_val if isinstance(new_val, list) else []
+                            if old_origins != new_origins:
+                                updates.append(f"{col} = %s")
+                                values.append(json.dumps(new_val) if isinstance(new_val, list) else new_val)
+                                changed_by = get_distribution_changed_by(dist_id, datetime.now())
+                                log_change('CloudFront', dist_id, col, old_val, new_val, changed_by, cf["AccountID"], cf["Region"])
+                        except (json.JSONDecodeError, TypeError):
+                            if str(old_val) != str(new_val):
+                                updates.append(f"{col} = %s")
+                                values.append(json.dumps(new_val) if isinstance(new_val, list) else new_val)
+                                changed_by = get_distribution_changed_by(dist_id, datetime.now())
+                                log_change('CloudFront', dist_id, col, old_val, new_val, changed_by, cf["AccountID"], cf["Region"])
+                    elif col in ['defaultcachebehavior']:
+                        import json
+                        try:
+                            old_behavior = json.loads(str(old_val)) if old_val and old_val != 'N/A' else {}
+                            new_behavior = new_val if isinstance(new_val, dict) else {}
+                            if old_behavior != new_behavior:
+                                updates.append(f"{col} = %s")
+                                values.append(json.dumps(new_val) if isinstance(new_val, dict) else new_val)
+                                changed_by = get_distribution_changed_by(dist_id, datetime.now())
+                                log_change('CloudFront', dist_id, col, old_val, new_val, changed_by, cf["AccountID"], cf["Region"])
+                        except (json.JSONDecodeError, TypeError):
+                            if str(old_val) != str(new_val):
+                                updates.append(f"{col} = %s")
+                                values.append(json.dumps(new_val) if isinstance(new_val, dict) else new_val)
+                                changed_by = get_distribution_changed_by(dist_id, datetime.now())
+                                log_change('CloudFront', dist_id, col, old_val, new_val, changed_by, cf["AccountID"], cf["Region"])
+                    else:
+                        if str(old_val) != str(new_val):
+                            updates.append(f"{col} = %s")
+                            values.append(new_val)
+                            changed_by = get_distribution_changed_by(dist_id, datetime.now())
+                            log_change('CloudFront', dist_id, col, old_val, new_val, changed_by, cf["AccountID"], cf["Region"])
                 
                 updates.append("last_updated = NOW()")
                 
