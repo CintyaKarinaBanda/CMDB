@@ -96,14 +96,14 @@ def insert_or_update_cloudformation_data(cloudformation_data):
     try:
         cursor = conn.cursor()
 
-        # Obtener datos existentes usando stack_name + account_id como clave única
+        # Obtener datos existentes usando stack_name + account_id + region como clave única
         cursor.execute("SELECT * FROM cloudformation")
         columns = [desc[0].lower() for desc in cursor.description]
-        existing_data = {f"{row[columns.index('stack_name')]}_{row[columns.index('account_id')]}": dict(zip(columns, row)) for row in cursor.fetchall()}
+        existing_data = {f"{row[columns.index('stack_name')]}_{row[columns.index('account_id')]}_{row[columns.index('region')]}": dict(zip(columns, row)) for row in cursor.fetchall()}
 
         for stack in cloudformation_data:
             stack_name = stack["StackName"]
-            stack_key = f"{stack_name}_{stack['AccountID']}"
+            stack_key = f"{stack_name}_{stack['AccountID']}_{stack['Region']}"
             processed += 1
 
             insert_values = (
@@ -163,8 +163,8 @@ def insert_or_update_cloudformation_data(cloudformation_data):
                 updates.append("last_updated = CURRENT_TIMESTAMP")
 
                 if updates:
-                    update_query = f"UPDATE cloudformation SET {', '.join(updates)} WHERE stack_name = %s AND account_id = %s"
-                    values.extend([stack_name, stack["AccountID"]])
+                    update_query = f"UPDATE cloudformation SET {', '.join(updates)} WHERE stack_name = %s AND account_id = %s AND region = %s"
+                    values.extend([stack_name, stack["AccountID"], stack["Region"]])
                     cursor.execute(update_query, tuple(values))
                     updated += 1
 
