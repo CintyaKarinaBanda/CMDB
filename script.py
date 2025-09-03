@@ -200,7 +200,7 @@ def main(services):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Recolecta información de recursos AWS')
     parser.add_argument('--services', nargs='+', default=["ec2", "cloudtrail"],
-                      choices=["ec2", "rds", "redshift", "vpc", "subnets", "cloudtrail", "s3", "eks", "ecr", "kms", "lambda", "apigateway", "glue", "cloudformation", "cloudtrail_trails", "ssm", "tax", "stepfunctions", "athena", "transfer", "codepipeline", "emr", "codebuild", "sns", "route53", "all"],
+                      choices=["ec2", "rds", "redshift", "vpc", "subnets", "cloudtrail", "s3", "eks", "ecr", "kms", "lambda", "apigateway", "glue", "cloudformation", "cloudtrail_trails", "ssm", "tax", "stepfunctions", "athena", "transfer", "codepipeline", "emr", "codebuild", "sns", "route53", "cloudfront", "all"],
                       help='Servicios a consultar')
     args = parser.parse_args()
     services = ["ec2", "rds", "redshift", "vpc", "subnets", "s3", "eks", "ecr", "kms", "lambda", "apigateway", "glue", "cloudformation", "cloudtrail_trails", "ssm", "tax", "stepfunctions",  "athena", "transfer", "codepipeline", "emr", "codebuild", "sns", "route53"] if "all" in args.services else args.services
