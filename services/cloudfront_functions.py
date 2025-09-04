@@ -40,7 +40,9 @@ def get_distribution_changed_by(distribution_id, update_date):
 
 def get_origin_details(origins):
     """Extrae detalles de los orígenes de la distribución"""
+    print(f"DEBUG: Origins input: {origins}")
     if not origins:
+        print("DEBUG: No origins found")
         return []
     
     origin_list = []
@@ -52,6 +54,8 @@ def get_origin_details(origins):
             "type": "S3" if (".s3." in domain_name or ".s3-" in domain_name or domain_name.endswith(".s3.amazonaws.com")) else "Custom"
         }
         origin_list.append(origin_info)
+        print(f"DEBUG: Added origin: {origin_info}")
+    print(f"DEBUG: Final origin_list: {origin_list}")
     return origin_list
 
 def get_cache_behavior_summary(behaviors):
@@ -64,8 +68,14 @@ def get_cache_behavior_summary(behaviors):
 def extract_distribution_data(distribution, account_name, account_id, region):
     """Extrae y formatea los datos de una distribución CloudFront"""
     config = distribution.get("DistributionConfig", {})
+    print(f"DEBUG: Distribution config: {config.keys()}")
+    print(f"DEBUG: Origins in config: {config.get('Origins', {})}")
+    
     tags = distribution.get("Tags", {}).get("Items", [])
     get_tag = lambda key: next((t["Value"] for t in tags if t["Key"] == key), "N/A")
+    
+    origins_data = get_origin_details(config.get("Origins", {}).get("Items", []))
+    print(f"DEBUG: Processed origins_data: {origins_data}")
     
     return {
         "AccountName": account_name,
@@ -75,7 +85,7 @@ def extract_distribution_data(distribution, account_name, account_id, region):
         "DomainName": distribution["DomainName"],
         "Status": distribution["Status"],
         "Region": region,
-        "Origins": get_origin_details(config.get("Origins", {}).get("Items", [])),
+        "Origins": origins_data,
         "DefaultCacheBehavior": {
             "target_origin": config.get("DefaultCacheBehavior", {}).get("TargetOriginId", ""),
             "viewer_protocol": config.get("DefaultCacheBehavior", {}).get("ViewerProtocolPolicy", "")
@@ -159,10 +169,13 @@ def insert_or_update_cloudfront_data(cloudfront_data):
         for cf in cloudfront_data:
             processed += 1
             dist_id = cf["DistributionID"]
+            import json
             insert_vals = (
                 cf["AccountName"], cf["AccountID"], dist_id, cf["DistributionName"],
-                cf["DomainName"], cf["Status"], cf["Region"], cf["Origins"],
-                cf["DefaultCacheBehavior"], cf["CacheBehaviors"], cf["Comment"],
+                cf["DomainName"], cf["Status"], cf["Region"], 
+                json.dumps(cf["Origins"]) if isinstance(cf["Origins"], list) else cf["Origins"],
+                json.dumps(cf["DefaultCacheBehavior"]) if isinstance(cf["DefaultCacheBehavior"], dict) else cf["DefaultCacheBehavior"],
+                cf["CacheBehaviors"], cf["Comment"],
                 cf["PriceClass"], cf["Enabled"], cf["WebACL"], cf["LastModified"]
             )
 
