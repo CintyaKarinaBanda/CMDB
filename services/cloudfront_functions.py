@@ -117,16 +117,20 @@ def get_cloudfront_distributions(region, credentials, account_id, account_name):
             
             for distribution in items:
                 try:
+                    # Obtener configuración completa de la distribución
+                    full_distribution = cloudfront_client.get_distribution(Id=distribution["Id"])
+                    distribution_data = full_distribution["Distribution"]
+                    
                     # Obtener tags para cada distribución
                     tags_response = cloudfront_client.list_tags_for_resource(
                         Resource=distribution["ARN"]
                     )
-                    distribution["Tags"] = tags_response
+                    distribution_data["Tags"] = tags_response
                     
-                    info = extract_distribution_data(distribution, account_name, account_id, region)
+                    info = extract_distribution_data(distribution_data, account_name, account_id, region)
                     distributions_info.append(info)
                 except ClientError:
-                    # Si no se pueden obtener tags, continuar sin ellas
+                    # Si no se pueden obtener detalles, usar datos básicos
                     info = extract_distribution_data(distribution, account_name, account_id, region)
                     distributions_info.append(info)
         
