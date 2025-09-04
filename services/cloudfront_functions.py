@@ -40,9 +40,7 @@ def get_distribution_changed_by(distribution_id, update_date):
 
 def get_origin_details(origins):
     """Extrae detalles de los orígenes de la distribución"""
-    print(f"DEBUG: Origins input: {origins}")
     if not origins:
-        print("DEBUG: No origins found")
         return []
     
     origin_list = []
@@ -54,8 +52,6 @@ def get_origin_details(origins):
             "type": "S3" if (".s3." in domain_name or ".s3-" in domain_name or domain_name.endswith(".s3.amazonaws.com")) else "Custom"
         }
         origin_list.append(origin_info)
-        print(f"DEBUG: Added origin: {origin_info}")
-    print(f"DEBUG: Final origin_list: {origin_list}")
     return origin_list
 
 def get_cache_behavior_summary(behaviors):
@@ -68,14 +64,10 @@ def get_cache_behavior_summary(behaviors):
 def extract_distribution_data(distribution, account_name, account_id, region):
     """Extrae y formatea los datos de una distribución CloudFront"""
     config = distribution.get("DistributionConfig", {})
-    print(f"DEBUG: Distribution config: {config.keys()}")
-    print(f"DEBUG: Origins in config: {config.get('Origins', {})}")
-    
     tags = distribution.get("Tags", {}).get("Items", [])
     get_tag = lambda key: next((t["Value"] for t in tags if t["Key"] == key), "N/A")
     
     origins_data = get_origin_details(config.get("Origins", {}).get("Items", []))
-    print(f"DEBUG: Processed origins_data: {origins_data}")
     
     return {
         "AccountName": account_name,
