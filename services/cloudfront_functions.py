@@ -209,7 +209,10 @@ def insert_or_update_cloudfront_data(cloudfront_data):
                         try:
                             old_origins = json.loads(str(old_val)) if old_val and old_val != 'N/A' else []
                             new_origins = new_val if isinstance(new_val, list) else []
-                            if old_origins != new_origins:
+                            # Normalizar para comparación (ordenar por id)
+                            old_sorted = sorted(old_origins, key=lambda x: x.get('id', '')) if old_origins else []
+                            new_sorted = sorted(new_origins, key=lambda x: x.get('id', '')) if new_origins else []
+                            if old_sorted != new_sorted:
                                 updates.append(f"{col} = %s")
                                 values.append(json.dumps(new_val) if isinstance(new_val, list) else new_val)
                                 changed_by = get_distribution_changed_by(dist_id, datetime.now())
