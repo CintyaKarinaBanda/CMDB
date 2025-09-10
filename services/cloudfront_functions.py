@@ -209,63 +209,60 @@ def insert_or_update_cloudfront_data(cloudfront_data):
                         try:
                             old_origins = json.loads(str(old_val)) if old_val and old_val != 'N/A' else []
                             new_origins = new_val if isinstance(new_val, list) else []
-                            # Normalizar para comparación (ordenar lista y claves de diccionarios)
-                            def normalize_origins(origins):
-                                if not origins:
-                                    return []
-                                # Ordenar lista por id y normalizar orden de claves en cada dict
-                                sorted_origins = sorted(origins, key=lambda x: x.get('id', ''))
-                                return [{k: v for k, v in sorted(origin.items())} for origin in sorted_origins]
                             
-                            old_normalized = normalize_origins(old_origins)
-                            new_normalized = normalize_origins(new_origins)
+                            # Normalizar: ordenar campos dentro de cada objeto
+                            def normalize_origin(origin):
+                                if isinstance(origin, dict):
+                                    return {k: origin[k] for k in sorted(origin.keys())}
+                                return origin
+                            
+                            old_normalized = [normalize_origin(o) for o in old_origins]
+                            new_normalized = [normalize_origin(o) for o in new_origins]
+                            
                             if old_normalized != new_normalized:
                                 updates.append(f"{col} = %s")
-                                values.append(json.dumps(new_val) if isinstance(new_val, list) else new_val)
-                                changed_by = get_distribution_changed_by(dist_id, datetime.now())
-                                log_change('CloudFront', dist_id, col, old_val, new_val, changed_by, cf["AccountID"], cf["Region"])
-                        except (json.JSONDecodeError, TypeError):
+                                values.append(json.dumps(new_val))
+                        except Exception:
                             if str(old_val) != str(new_val):
                                 updates.append(f"{col} = %s")
                                 values.append(json.dumps(new_val) if isinstance(new_val, list) else new_val)
-                                changed_by = get_distribution_changed_by(dist_id, datetime.now())
-                                log_change('CloudFront', dist_id, col, old_val, new_val, changed_by, cf["AccountID"], cf["Region"])
-                    elif col in ['defaultcachebehavior']:
+                    
+                    # Manejo especial para defaultcachebehavior (objeto)
+                    elif col == 'defaultcachebehavior':
                         import json
                         try:
                             old_behavior = json.loads(str(old_val)) if old_val and old_val != 'N/A' else {}
                             new_behavior = new_val if isinstance(new_val, dict) else {}
-                            if old_behavior != new_behavior:
+                            
+                            # Normalizar: ordenar campos
+                            old_normalized = {k: old_behavior[k] for k in sorted(old_behavior.keys())} if old_behavior else {}
+                            new_normalized = {k: new_behavior[k] for k in sorted(new_behavior.keys())} if new_behavior else {}
+                            
+                            if old_normalized != new_normalized:
                                 updates.append(f"{col} = %s")
-                                values.append(json.dumps(new_val) if isinstance(new_val, dict) else new_val)
-                                changed_by = get_distribution_changed_by(dist_id, datetime.now())
-                                log_change('CloudFront', dist_id, col, old_val, new_val, changed_by, cf["AccountID"], cf["Region"])
-                        except (json.JSONDecodeError, TypeError):
+                                values.append(json.dumps(new_val))
+                        except Exception:
                             if str(old_val) != str(new_val):
                                 updates.append(f"{col} = %s")
                                 values.append(json.dumps(new_val) if isinstance(new_val, dict) else new_val)
-                                changed_by = get_distribution_changed_by(dist_id, datetime.now())
-                                log_change('CloudFront', dist_id, col, old_val, new_val, changed_by, cf["AccountID"], cf["Region"])
+                    
+                    # Comparación normal para otros campos
                     else:
                         if str(old_val) != str(new_val):
                             updates.append(f"{col} = %s")
                             values.append(new_val)
-                            changed_by = get_distribution_changed_by(dist_id, datetime.now())
-                            log_change('CloudFront', dist_id, col, old_val, new_val, changed_by, cf["AccountID"], cf["Region"])
-                
-                updates.append("last_updated = NOW()")
                 
                 if updates:
-                    update_query = f"UPDATE cloudfront SET {', '.join(updates)} WHERE distributionid = %s"
+                    update_sql = f"UPDATE cloudfront SET {', '.join(updates)}, last_updated = NOW() WHERE DistributionID = %s"
                     values.append(dist_id)
-                    cursor.execute(update_query, tuple(values))
+                    cursor.execute(update_sql, values)
                     updated += 1
 
         conn.commit()
         return {"processed": processed, "inserted": inserted, "updated": updated}
-
+    
     except Exception as e:
         conn.rollback()
-        return {"error": str(e), "processed": 0, "inserted": 0, "updated": 0}
+        return {"error": str(e), "processed": processed, "inserted": inserted, "updated": updated}
     finally:
         conn.close()
