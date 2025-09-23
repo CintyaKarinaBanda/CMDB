@@ -188,13 +188,14 @@ def insert_or_update_apigateway_data(apigateway_data):
                         changed_by = get_resource_changed_by(api_id, 'API-GATEWAY', datetime.now(), col)
                         log_change('API-GATEWAY', api_id, col, old_val, new_val, changed_by, api["AccountID"], api["Region"])
 
-                updates.append("last_updated = CURRENT_TIMESTAMP")
-
                 if updates:
+                    updates.append("last_updated = CURRENT_TIMESTAMP")
                     update_query = f"UPDATE apigateway SET {', '.join(updates)} WHERE api_id = %s"
                     values.append(api_id)
                     cursor.execute(update_query, tuple(values))
                     updated += 1
+                else:
+                    cursor.execute("UPDATE apigateway SET last_updated = CURRENT_TIMESTAMP WHERE api_id = %s", [api_id])
 
         conn.commit()
         return {

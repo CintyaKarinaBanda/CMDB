@@ -212,13 +212,14 @@ def insert_or_update_lambda_data(lambda_data):
                         changed_by = get_function_changed_by(function_name, datetime.now())
                         log_change('LAMBDA', function_name, col, old_val, new_val, changed_by, func["AccountID"], func["Region"])
                 
-                updates.append("last_updated = NOW()")
-                
                 if updates:
+                    updates.append("last_updated = NOW()")
                     update_query = f"UPDATE lambda_functions SET {', '.join(updates)} WHERE functionname = %s AND accountid = %s AND region = %s"
                     values.extend([function_name, account_id, region])
                     cursor.execute(update_query, tuple(values))
                     updated += 1
+                else:
+                    cursor.execute("UPDATE lambda_functions SET last_updated = NOW() WHERE functionname = %s AND accountid = %s AND region = %s", [function_name, account_id, region])
             conn.commit()
         print(f"[LAMBDA] BD: {inserted} insertados, {updated} actualizados de {processed} procesados")
         return {"processed": processed, "inserted": inserted, "updated": updated}

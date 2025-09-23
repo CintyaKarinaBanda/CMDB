@@ -207,13 +207,14 @@ def insert_or_update_subnet_data(subnet_data):
                         changed_by = get_subnet_changed_by(subnet_id, datetime.now())
                         log_change('SUBNET', subnet_id, col, old_val, new_val, changed_by, subnet["AccountID"], subnet["Region"])
 
-                updates.append("last_updated = NOW()")
-
                 if updates:
+                    updates.append("last_updated = NOW()")
                     update_query = f"UPDATE subnets SET {', '.join(updates)} WHERE subnetid = %s"
                     values.append(subnet_id)
                     cursor.execute(update_query, tuple(values))
                     updated += 1
+                else:
+                    cursor.execute("UPDATE subnets SET last_updated = NOW() WHERE subnetid = %s", [subnet_id])
 
         conn.commit()
         return {

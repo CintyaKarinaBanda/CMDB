@@ -137,6 +137,8 @@ def insert_or_update_eks_data(eks_data):
                 if updates:
                     cursor.execute(f"UPDATE eks SET {', '.join(updates)}, last_updated = NOW() WHERE clustername = %s", vals + [cluster_name])
                     updated += 1
+                else:
+                    cursor.execute("UPDATE eks SET last_updated = NOW() WHERE clustername = %s", [cluster_name])
         
         conn.commit()
         return {"processed": processed, "inserted": inserted, "updated": updated}

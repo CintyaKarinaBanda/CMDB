@@ -167,13 +167,14 @@ def insert_or_update_transfer_data(transfer_data):
                         changed_by = get_server_changed_by(server_id, datetime.now())
                         log_change('TRANSFER-FAMILY', server_id, col, old_val, new_val, changed_by, server["AccountID"], server["Region"])
 
-                updates.append("last_updated = CURRENT_TIMESTAMP")
-
                 if updates:
+                    updates.append("last_updated = CURRENT_TIMESTAMP")
                     update_query = f"UPDATE transfer_family SET {', '.join(updates)} WHERE server_id = %s AND account_id = %s"
                     values.extend([server_id, server["AccountID"]])
                     cursor.execute(update_query, tuple(values))
                     updated += 1
+                else:
+                    cursor.execute("UPDATE transfer_family SET last_updated = CURRENT_TIMESTAMP WHERE server_id = %s AND account_id = %s", [server_id, server["AccountID"]])
 
         conn.commit()
         return {

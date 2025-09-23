@@ -181,13 +181,14 @@ def insert_or_update_athena_data(athena_data):
                         changed_by = get_query_changed_by(query_id, datetime.now())
                         log_change('ATHENA', query_id, col, old_val, new_val, changed_by, query["AccountID"], query["Region"])
 
-                updates.append("last_updated = CURRENT_TIMESTAMP")
-
                 if updates:
+                    updates.append("last_updated = CURRENT_TIMESTAMP")
                     update_query = f"UPDATE athena SET {', '.join(updates)} WHERE query_id = %s AND account_id = %s"
                     values.extend([query_id, query["AccountID"]])
                     cursor.execute(update_query, tuple(values))
                     updated += 1
+                else:
+                    cursor.execute("UPDATE athena SET last_updated = CURRENT_TIMESTAMP WHERE query_id = %s AND account_id = %s", [query_id, query["AccountID"]])
 
         conn.commit()
         return {

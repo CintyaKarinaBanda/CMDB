@@ -187,13 +187,14 @@ def insert_or_update_redshift_data(redshift_data):
                         changed_by = get_cluster_changed_by(cluster_id=database_id, field_name=col)
                         log_change('REDSHIFT', database_id, col, old_val, new_val, changed_by, cluster["AccountID"], cluster["Region"])
 
-                updates.append("last_updated = NOW()")
-
                 if updates:
+                    updates.append("last_updated = NOW()")
                     update_query = f"UPDATE redshift SET {', '.join(updates)} WHERE database_id = %s"
                     values.append(database_id)
                     cursor.execute(update_query, tuple(values))
                     updated += 1
+                else:
+                    cursor.execute("UPDATE redshift SET last_updated = NOW() WHERE database_id = %s", [database_id])
 
         conn.commit()
         return {

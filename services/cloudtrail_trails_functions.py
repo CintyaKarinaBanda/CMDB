@@ -158,13 +158,16 @@ def insert_or_update_cloudtrail_trails_data(cloudtrail_trails_data):
                         changed_by = get_trail_changed_by(trail_name, datetime.now())
                         log_change('CLOUDTRAIL', trail_name, col, old_val, new_val, changed_by, trail["AccountID"], trail["Region"])
 
-                updates.append("last_updated = CURRENT_TIMESTAMP")
+                if updates:
+                    updates.append("last_updated = CURRENT_TIMESTAMP")
 
                 if updates:
                     update_query = f"UPDATE cloudtrail_trails SET {', '.join(updates)} WHERE trail_name = %s"
                     values.append(trail_name)
                     cursor.execute(update_query, tuple(values))
                     updated += 1
+                else:
+                    cursor.execute("UPDATE [TABLE] SET last_updated = [TIMESTAMP] WHERE [KEY] = %s", [[ID]])
 
         conn.commit()
         return {

@@ -167,13 +167,16 @@ def insert_or_update_codepipeline_data(codepipeline_data):
                         changed_by = get_resource_changed_by(pipeline_name, 'CODEPIPELINE', datetime.now(), col)
                         log_change('CODEPIPELINE', pipeline_name, col, old_val, new_val, changed_by, pipeline["AccountID"], pipeline["Region"])
 
-                updates.append("last_updated = CURRENT_TIMESTAMP")
+                if updates:
+                    updates.append("last_updated = CURRENT_TIMESTAMP")
 
                 if updates:
                     update_query = f"UPDATE codepipeline SET {', '.join(updates)} WHERE pipeline_name = %s AND account_id = %s"
                     values.extend([pipeline_name, pipeline["AccountID"]])
                     cursor.execute(update_query, tuple(values))
                     updated += 1
+                else:
+                    cursor.execute("UPDATE [TABLE] SET last_updated = [TIMESTAMP] WHERE [KEY] = %s", [[ID]])
 
         conn.commit()
         return {

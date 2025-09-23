@@ -257,6 +257,8 @@ def insert_or_update_cloudfront_data(cloudfront_data):
                     values.append(dist_id)
                     cursor.execute(update_sql, values)
                     updated += 1
+                else:
+                    cursor.execute("UPDATE [TABLE] SET last_updated = [TIMESTAMP] WHERE [KEY] = %s", [[ID]])
 
         conn.commit()
         return {"processed": processed, "inserted": inserted, "updated": updated}

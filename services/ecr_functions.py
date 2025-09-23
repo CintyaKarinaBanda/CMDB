@@ -143,6 +143,8 @@ def insert_or_update_ecr_data(ecr_data):
                 if updates:
                     cursor.execute(f"UPDATE ecr SET {', '.join(updates)}, last_updated = NOW() WHERE repositoryname = %s", vals + [repo_name])
                     updated += 1
+                else:
+                    cursor.execute("UPDATE ecr SET last_updated = NOW() WHERE repositoryname = %s", [repo_name])
         
         conn.commit()
         return {"processed": processed, "inserted": inserted, "updated": updated}

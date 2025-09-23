@@ -179,13 +179,16 @@ def insert_or_update_emr_data(emr_data):
                         changed_by = get_cluster_changed_by(cluster_id, datetime.now())
                         log_change('EMR', cluster_id, col, old_val, new_val, changed_by, cluster["AccountID"], cluster["Region"])
 
-                updates.append("last_updated = CURRENT_TIMESTAMP")
+                if updates:
+                    updates.append("last_updated = CURRENT_TIMESTAMP")
 
                 if updates:
                     update_query = f"UPDATE emr SET {', '.join(updates)} WHERE cluster_id = %s AND account_id = %s"
                     values.extend([cluster_id, cluster["AccountID"]])
                     cursor.execute(update_query, tuple(values))
                     updated += 1
+                else:
+                    cursor.execute("UPDATE [TABLE] SET last_updated = [TIMESTAMP] WHERE [KEY] = %s", [[ID]])
 
         conn.commit()
         return {
