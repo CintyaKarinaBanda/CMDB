@@ -225,14 +225,13 @@ def insert_or_update_vpc_data(vpc_data):
                         changed_by = get_vpc_changed_by(vpc_id, datetime.now())
                         log_change('VPC', vpc_id, col, old_val, new_val, changed_by, vpc["AccountID"], vpc["Region"])
 
+                updates.append("last_updated = NOW()")
+
                 if updates:
-                    updates.append("last_updated = NOW()")
                     update_query = f"UPDATE vpcs SET {', '.join(updates)} WHERE vpc_id = %s"
                     values.append(vpc_id)
                     cursor.execute(update_query, tuple(values))
                     updated += 1
-                else:
-                    cursor.execute("UPDATE vpcs SET last_updated = NOW() WHERE vpc_id = %s", [vpc_id])
 
         conn.commit()
         return {

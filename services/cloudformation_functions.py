@@ -162,12 +162,14 @@ def insert_or_update_cloudformation_data(cloudformation_data):
 
                 if updates:
                     updates.append("last_updated = CURRENT_TIMESTAMP")
+
+                if updates:
                     update_query = f"UPDATE cloudformation SET {', '.join(updates)} WHERE stack_name = %s AND account_id = %s AND region = %s"
                     values.extend([stack_name, stack["AccountID"], stack["Region"]])
                     cursor.execute(update_query, tuple(values))
                     updated += 1
                 else:
-                    cursor.execute("UPDATE cloudformation SET last_updated = CURRENT_TIMESTAMP WHERE stack_name = %s AND account_id = %s AND region = %s", [stack_name, stack["AccountID"], stack["Region"]])
+                    cursor.execute("UPDATE [TABLE] SET last_updated = [TIMESTAMP] WHERE [KEY] = %s", [[ID]])
 
         conn.commit()
         return {

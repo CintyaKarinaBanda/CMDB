@@ -226,14 +226,13 @@ def insert_or_update_ec2_data(ec2_data):
                             changed_by = get_instance_changed_by(iid, datetime.now())
                             log_change('EC2', iid, col, old_val, new_val, changed_by, ec2["AccountID"], ec2["Region"])
                 
+                updates.append("last_updated = NOW()")
+                
                 if updates:
-                    updates.append("last_updated = NOW()")
                     update_query = f"UPDATE ec2 SET {', '.join(updates)} WHERE instanceid = %s"
                     values.append(iid)
                     cursor.execute(update_query, tuple(values))
                     updated += 1
-                else:
-                    cursor.execute("UPDATE ec2 SET last_updated = NOW() WHERE instanceid = %s", [iid])
 
         conn.commit()
         return {"processed": processed, "inserted": inserted, "updated": updated}

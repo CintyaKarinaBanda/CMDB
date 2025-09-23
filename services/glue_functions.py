@@ -177,14 +177,13 @@ def insert_or_update_glue_data(glue_data):
                         changed_by = get_resource_changed_by(job_name, 'GLUE', datetime.now(), col)
                         log_change('GLUE', job_name, col, old_val, new_val, changed_by, job["AccountID"], job["Region"])
 
+                updates.append("last_updated = CURRENT_TIMESTAMP")
+
                 if updates:
-                    updates.append("last_updated = CURRENT_TIMESTAMP")
                     update_query = f"UPDATE glue SET {', '.join(updates)} WHERE job_name = %s"
                     values.append(job_name)
                     cursor.execute(update_query, tuple(values))
                     updated += 1
-                else:
-                    cursor.execute("UPDATE glue SET last_updated = CURRENT_TIMESTAMP WHERE job_name = %s", [job_name])
 
         conn.commit()
         return {

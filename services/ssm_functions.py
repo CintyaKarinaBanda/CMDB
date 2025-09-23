@@ -176,14 +176,13 @@ def insert_or_update_ssm_data(ssm_data):
                         
                         log_change('SSM', association_id, col, old_val, new_val, changed_by, association["AccountID"], association["Region"])
 
+                updates.append("last_updated = CURRENT_TIMESTAMP")
+
                 if updates:
-                    updates.append("last_updated = CURRENT_TIMESTAMP")
                     update_query = f"UPDATE ssm SET {', '.join(updates)} WHERE association_id = %s"
                     values.append(association_id)
                     cursor.execute(update_query, tuple(values))
                     updated += 1
-                else:
-                    cursor.execute("UPDATE ssm SET last_updated = CURRENT_TIMESTAMP WHERE association_id = %s", [association_id])
 
         conn.commit()
         return {

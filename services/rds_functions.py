@@ -180,14 +180,13 @@ def insert_or_update_rds_data(rds_data):
                         changed_by = get_instance_changed_by(instance_id, datetime.now())
                         log_change('RDS', instance_id, col, old_val, new_val, changed_by, rds["AccountID"], rds["Region"])
                 
+                updates.append("last_updated = NOW()")
+                
                 if updates:
-                    updates.append("last_updated = NOW()")
                     update_query = f"UPDATE rds SET {', '.join(updates)} WHERE dbinstanceid = %s AND accountid = %s"
                     values.extend([instance_id, rds["AccountID"]])
                     cursor.execute(update_query, tuple(values))
                     updated += 1
-                else:
-                    cursor.execute("UPDATE rds SET last_updated = NOW() WHERE dbinstanceid = %s AND accountid = %s", [instance_id, rds["AccountID"]])
 
         conn.commit()
 
