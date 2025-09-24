@@ -194,6 +194,8 @@ def insert_or_update_tax_data(tax_data):
                     values.append(query_id)
                     cursor.execute(update_query, tuple(values))
                     updated += 1
+                else:
+                    cursor.execute("UPDATE tax SET last_updated = CURRENT_TIMESTAMP WHERE query_id = %s", [query_id])
 
         conn.commit()
         return {

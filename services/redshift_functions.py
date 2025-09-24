@@ -194,6 +194,8 @@ def insert_or_update_redshift_data(redshift_data):
                     values.append(database_id)
                     cursor.execute(update_query, tuple(values))
                     updated += 1
+                else:
+                    cursor.execute("UPDATE redshift SET last_updated = NOW() WHERE database_id = %s AND account_id = %s", [database_id, cluster["AccountID"]])
 
         conn.commit()
         return {

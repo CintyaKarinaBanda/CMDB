@@ -232,6 +232,8 @@ def insert_or_update_vpc_data(vpc_data):
                     values.append(vpc_id)
                     cursor.execute(update_query, tuple(values))
                     updated += 1
+                else:
+                    cursor.execute("UPDATE vpcs SET last_updated = NOW() WHERE vpc_id = %s AND account_id = %s", [vpc_id, vpc["AccountID"]])
 
         conn.commit()
         return {

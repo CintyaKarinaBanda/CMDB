@@ -108,15 +108,27 @@ def insert_or_update_codebuild_data(codebuild_data):
                         log_change('CODEBUILD', pn, field, old_val, new_val, changed_by, 
                                  project["AccountID"], "us-east-1")
                 
-                cur.execute("""
-                    UPDATE codebuild SET source_provider=%s, repository=%s, last_build_status=%s,
-                    description=%s, last_modified=%s, last_updated=NOW()
-                    WHERE project_name=%s AND account_id=%s
-                """, (
-                    project["SourceProvider"], project["Repository"], project["LastBuildStatus"],
-                    project["Description"], project["LastModified"], pn, project["AccountID"]
-                ))
-                upd += 1
+                updates_made = False
+                for field, new_val in fields_map.items():
+                    old_val = old_data.get(field)
+                    if str(old_val) != str(new_val):
+                        updates_made = True
+                        changed_by = get_resource_changed_by(pn, 'CODEBUILD', datetime.now(), field)
+                        log_change('CODEBUILD', pn, field, old_val, new_val, changed_by, 
+                                 project["AccountID"], "us-east-1")
+                
+                if updates_made:
+                    cur.execute("""
+                        UPDATE codebuild SET source_provider=%s, repository=%s, last_build_status=%s,
+                        description=%s, last_modified=%s, last_updated=NOW()
+                        WHERE project_name=%s AND account_id=%s
+                    """, (
+                        project["SourceProvider"], project["Repository"], project["LastBuildStatus"],
+                        project["Description"], project["LastModified"], pn, project["AccountID"]
+                    ))
+                    upd += 1
+                else:
+                    cur.execute("UPDATE codebuild SET last_updated=NOW() WHERE project_name=%s AND account_id=%s", [pn, project["AccountID"]])
 
         conn.commit()
         return {"processed": len(codebuild_data), "inserted": ins, "updated": upd}

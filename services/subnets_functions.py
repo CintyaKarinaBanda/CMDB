@@ -214,6 +214,8 @@ def insert_or_update_subnet_data(subnet_data):
                     values.append(subnet_id)
                     cursor.execute(update_query, tuple(values))
                     updated += 1
+                else:
+                    cursor.execute("UPDATE subnets SET last_updated = NOW() WHERE subnetid = %s AND accountid = %s", [subnet_id, subnet["AccountID"]])
 
         conn.commit()
         return {

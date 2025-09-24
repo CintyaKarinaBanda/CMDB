@@ -219,7 +219,10 @@ def insert_or_update_lambda_data(lambda_data):
                     values.extend([function_name, account_id, region])
                     cursor.execute(update_query, tuple(values))
                     updated += 1
-            conn.commit()
+                else:
+                    cursor.execute("UPDATE lambda_functions SET last_updated = NOW() WHERE functionname = %s AND accountid = %s AND region = %s", [function_name, account_id, region])
+        
+        conn.commit()
         print(f"[LAMBDA] BD: {inserted} insertados, {updated} actualizados de {processed} procesados")
         return {"processed": processed, "inserted": inserted, "updated": updated}
     except Exception as e:

@@ -188,7 +188,7 @@ def insert_or_update_emr_data(emr_data):
                     cursor.execute(update_query, tuple(values))
                     updated += 1
                 else:
-                    cursor.execute("UPDATE [TABLE] SET last_updated = [TIMESTAMP] WHERE [KEY] = %s", [[ID]])
+                    cursor.execute("UPDATE emr SET last_updated = CURRENT_TIMESTAMP WHERE cluster_id = %s AND account_id = %s", [cluster_id, cluster["AccountID"]])
 
         conn.commit()
         return {

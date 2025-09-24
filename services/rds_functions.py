@@ -187,6 +187,8 @@ def insert_or_update_rds_data(rds_data):
                     values.extend([instance_id, rds["AccountID"]])
                     cursor.execute(update_query, tuple(values))
                     updated += 1
+                else:
+                    cursor.execute("UPDATE rds SET last_updated = NOW() WHERE dbinstanceid = %s AND accountid = %s", [instance_id, rds["AccountID"]])
 
         conn.commit()
 

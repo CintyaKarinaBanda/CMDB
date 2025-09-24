@@ -184,6 +184,8 @@ def insert_or_update_glue_data(glue_data):
                     values.append(job_name)
                     cursor.execute(update_query, tuple(values))
                     updated += 1
+                else:
+                    cursor.execute("UPDATE glue SET last_updated = CURRENT_TIMESTAMP WHERE job_name = %s", [job_name])
 
         conn.commit()
         return {

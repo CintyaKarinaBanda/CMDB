@@ -153,10 +153,8 @@ def insert_or_update_kms_data(kms_data):
                 if updates:
                     cursor.execute(f"UPDATE kms SET {', '.join(updates)}, last_updated = NOW() WHERE keyid = %s", vals + [key_id])
                     updated += 1
-
-                
                 else:
-                    cursor.execute("UPDATE kms SET last_updated = NOW() WHERE keyid = %s", [keyid])
+                    cursor.execute("UPDATE kms SET last_updated = NOW() WHERE keyid = %s", [key_id])
         
         conn.commit()
         return {"processed": processed, "inserted": inserted, "updated": updated}

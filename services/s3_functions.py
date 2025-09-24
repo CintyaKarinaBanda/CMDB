@@ -187,6 +187,8 @@ def insert_or_update_s3_data(s3_data):
                     updates.append("last_updated = NOW()")
                     cur.execute(f"UPDATE s3 SET {', '.join(updates)} WHERE bucket_name = %s", vals + [bn])
                     upd += 1
+                else:
+                    cur.execute("UPDATE s3 SET last_updated = NOW() WHERE bucket_name = %s AND account_id = %s", [bn, b["AccountID"]])
 
         conn.commit()
         return {"processed": len(s3_data), "inserted": ins, "updated": upd}

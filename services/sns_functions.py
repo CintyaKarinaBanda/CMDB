@@ -102,13 +102,16 @@ def insert_or_update_sns_data(sns_data):
                         log_change('SNS', ta, field, old_val, new_val, changed_by, 
                                  topic["AccountID"], "us-east-1")
                 
-                cur.execute("""
-                    UPDATE sns SET topic_name=%s, domain=%s, display_name=%s, type=%s, last_updated=NOW()
-                    WHERE topic_arn=%s AND account_id=%s
-                """, (
-                    topic["TopicName"], topic["Domain"], topic["DisplayName"], topic["Type"], ta, topic["AccountID"]
-                ))
-                upd += 1
+                if any(str(old_data.get(field)) != str(new_val) for field, new_val in fields_map.items()):
+                    cur.execute("""
+                        UPDATE sns SET topic_name=%s, domain=%s, display_name=%s, type=%s, last_updated=NOW()
+                        WHERE topic_arn=%s AND account_id=%s
+                    """, (
+                        topic["TopicName"], topic["Domain"], topic["DisplayName"], topic["Type"], ta, topic["AccountID"]
+                    ))
+                    upd += 1
+                else:
+                    cur.execute("UPDATE sns SET last_updated=NOW() WHERE topic_arn=%s AND account_id=%s", (ta, topic["AccountID"]))
 
         conn.commit()
         return {"processed": len(sns_data), "inserted": ins, "updated": upd}

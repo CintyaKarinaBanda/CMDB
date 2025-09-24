@@ -130,15 +130,18 @@ def insert_or_update_route53_data(route53_data):
                         log_change('ROUTE53', rec_id, field, old_val, new_val, changed_by, 
                                  record["AccountID"], "us-east-1")
                 
-                cur.execute("""
-                    UPDATE route53 SET domain_name=%s, record_type=%s, record_value=%s, 
-                    ttl=%s, hosted_zone=%s, last_updated=NOW()
-                    WHERE record_id=%s AND account_id=%s
-                """, (
-                    record["DomainName"], record["RecordType"], record["RecordValue"],
-                    record["TTL"], record["HostedZone"], rec_id, record["AccountID"]
-                ))
-                upd += 1
+                if any(str(old_data.get(field)) != str(new_val) for field, new_val in fields_map.items()):
+                    cur.execute("""
+                        UPDATE route53 SET domain_name=%s, record_type=%s, record_value=%s, 
+                        ttl=%s, hosted_zone=%s, last_updated=NOW()
+                        WHERE record_id=%s AND account_id=%s
+                    """, (
+                        record["DomainName"], record["RecordType"], record["RecordValue"],
+                        record["TTL"], record["HostedZone"], rec_id, record["AccountID"]
+                    ))
+                    upd += 1
+                else:
+                    cur.execute("UPDATE route53 SET last_updated=NOW() WHERE record_id=%s AND account_id=%s", (rec_id, record["AccountID"]))
 
         conn.commit()
         return {"processed": len(route53_data), "inserted": ins, "updated": upd}

@@ -174,6 +174,8 @@ def insert_or_update_transfer_data(transfer_data):
                     values.extend([server_id, server["AccountID"]])
                     cursor.execute(update_query, tuple(values))
                     updated += 1
+                else:
+                    cursor.execute("UPDATE transfer_family SET last_updated = CURRENT_TIMESTAMP WHERE server_id = %s AND account_id = %s", [server_id, server["AccountID"]])
 
         conn.commit()
         return {

@@ -183,6 +183,8 @@ def insert_or_update_stepfunctions_data(stepfunctions_data):
                     values.append(stepfunction_arn)
                     cursor.execute(update_query, tuple(values))
                     updated += 1
+                else:
+                    cursor.execute("UPDATE stepfunctions SET last_updated = CURRENT_TIMESTAMP WHERE stepfunction_arn = %s", [stepfunction_arn])
 
         conn.commit()
         return {

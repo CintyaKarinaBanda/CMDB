@@ -169,7 +169,7 @@ def insert_or_update_cloudformation_data(cloudformation_data):
                     cursor.execute(update_query, tuple(values))
                     updated += 1
                 else:
-                    cursor.execute("UPDATE [TABLE] SET last_updated = [TIMESTAMP] WHERE [KEY] = %s", [[ID]])
+                    cursor.execute("UPDATE cloudformation SET last_updated = CURRENT_TIMESTAMP WHERE stack_name = %s AND account_id = %s AND region = %s", [stack_name, stack["AccountID"], stack["Region"]])
 
         conn.commit()
         return {

@@ -176,7 +176,7 @@ def insert_or_update_codepipeline_data(codepipeline_data):
                     cursor.execute(update_query, tuple(values))
                     updated += 1
                 else:
-                    cursor.execute("UPDATE [TABLE] SET last_updated = [TIMESTAMP] WHERE [KEY] = %s", [[ID]])
+                    cursor.execute("UPDATE codepipeline SET last_updated = CURRENT_TIMESTAMP WHERE pipeline_name = %s AND account_id = %s", [pipeline_name, pipeline["AccountID"]])
 
         conn.commit()
         return {

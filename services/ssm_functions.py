@@ -183,6 +183,8 @@ def insert_or_update_ssm_data(ssm_data):
                     values.append(association_id)
                     cursor.execute(update_query, tuple(values))
                     updated += 1
+                else:
+                    cursor.execute("UPDATE ssm SET last_updated = CURRENT_TIMESTAMP WHERE association_id = %s", [association_id])
 
         conn.commit()
         return {

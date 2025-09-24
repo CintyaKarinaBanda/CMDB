@@ -167,7 +167,7 @@ def insert_or_update_cloudtrail_trails_data(cloudtrail_trails_data):
                     cursor.execute(update_query, tuple(values))
                     updated += 1
                 else:
-                    cursor.execute("UPDATE [TABLE] SET last_updated = [TIMESTAMP] WHERE [KEY] = %s", [[ID]])
+                    cursor.execute("UPDATE cloudtrail_trails SET last_updated = CURRENT_TIMESTAMP WHERE trail_name = %s", [trail_name])
 
         conn.commit()
         return {
